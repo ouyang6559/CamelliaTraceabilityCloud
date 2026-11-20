@@ -13,6 +13,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/ouyang6559/CamelliaTraceabilityCloud/adapters/device/genericmqtt"
 	traceadapter "github.com/ouyang6559/CamelliaTraceabilityCloud/adapters/trace/mock"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/config"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/middleware"
@@ -92,8 +93,23 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 	alertModule := alert.NewModule(pool, pub, log)
 	devModule.SetAlertEvaluator(alertModule.EvaluateTelemetry)
 
+	// DeviceAdapter registry (specs/20): adapters registered by adapter_type.
+	// generic-mqtt is the only built-in adapter; dji-cloud stays unregistered
+	// until official credentials exist (specs/03.6 — do not fabricate APIs).
+	deviceRegistry := device.NewRegistry(pool, log)
+	if mqttAdapter, err := genericmqtt.New(cfg.MQTTURL, log); err == nil {
+		deviceRegistry.Register("generic-mqtt", mqttAdapter)
+		log.Info("device adapter registered", "type", "generic-mqtt")
+	} else {
+		log.Warn("generic-mqtt adapter unavailable; device dispatch disabled", "err", err)
+	}
+	if cfg.DJIAppKey != "" {
+		log.Warn("DJI credentials present but the dji-cloud adapter is not implemented yet (integration TODO, specs/03.6)")
+	}
+
 	missionModule := mission.NewModule(pool, traceSvc, pub)
 	missionModule.SetDeviceRecorder(devModule)
+	missionModule.SetDeviceDispatcher(deviceRegistry)
 
 	traceAPI := trace.NewAPI(traceSvc)
 	filesModule := files.NewModule(pool, storage, cfg.S3Bucket, middleware.Auth(jwt))
@@ -142,6 +158,7 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 			evModule.SetPermMiddleware(authorize("evidence", "read"), authorize("evidence", "create"))
 			evModule.Mount(priv)
 
+			devModule.SetRegistry(deviceRegistry)
 			devModule.Mount(priv, auth, authorize)
 			missionModule.Mount(priv, authorize)
 			missionModule.MountDeviceGateway(api) // device-token authenticated

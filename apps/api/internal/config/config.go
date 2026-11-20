@@ -38,6 +38,16 @@ type Config struct {
 	AIAPIKey     string
 	AIModel      string
 
+	// Device adapter credentials. Each vendor adapter (adapters/device/<type>/)
+	// reads its own block; a field left empty means that adapter stays
+	// unregistered (specs/03.6, specs/06.11: never fabricate vendor APIs).
+	// DJI Cloud API requires an enterprise account (Dock / 经纬系列) — see
+	// https://developer.dji.com/doc/cloud-api-tutorial/en/. Integration TODO.
+	DJIAppID     string
+	DJIAppKey    string
+	DJIAppSecret string
+	DJIWorkspace string
+
 	LogLevel string
 }
 
@@ -66,6 +76,10 @@ func Load() *Config {
 		AIBaseURL:          getenv("CTC_AI_BASE_URL", ""),
 		AIAPIKey:           getenv("CTC_AI_API_KEY", ""),
 		AIModel:            getenv("CTC_AI_MODEL", "gpt-4o-mini"),
+		DJIAppID:           getenv("CTC_DJI_APP_ID", ""),
+		DJIAppKey:          getenv("CTC_DJI_APP_KEY", ""),
+		DJIAppSecret:       getenv("CTC_DJI_APP_SECRET", ""),
+		DJIWorkspace:       getenv("CTC_DJI_WORKSPACE", ""),
 		LogLevel:           getenv("CTC_LOG_LEVEL", "info"),
 	}
 	if c.JWTSecret == "" {

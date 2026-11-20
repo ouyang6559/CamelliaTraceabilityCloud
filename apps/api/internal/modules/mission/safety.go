@@ -184,32 +184,43 @@ func (m *Module) startMission(w http.ResponseWriter, r *http.Request) {
 		httpx.Respond(w, r, nil, err)
 		return
 	}
-	// Publish the execution envelope; the device simulator (and future real
-	// adapters) pick it up on NATS to execute the route (specs/02.4).
+	// Publish the execution envelope; the device simulator (and external
+	// gateways) pick it up on NATS, while real devices receive the command
+	// through their DeviceAdapter below — two channels, one truth (ADR-005).
 	if row, err := m.fetchMission(r.Context(), id.TenantID, missionID); err == nil && row != nil {
 		routeJSON, _ := json.Marshal(row.Route)
-		m.pub.Publish(id.TenantID, "mission.started", map[string]any{
+		payload := map[string]any{
 			"mission_id": missionID, "device_id": row.DeviceID,
 			"mission_type": row.MissionType, "route": json.RawMessage(routeJSON),
-		})
+		}
+		m.pub.Publish(id.TenantID, "mission.started", payload)
+		m.dispatchDevice(r.Context(), id.TenantID, row.DeviceID, missionID, "start", payload)
 	}
 	httpx.Respond(w, r, map[string]any{"status": "executing"}, nil)
 }
 
 func (m *Module) pauseMission(w http.ResponseWriter, r *http.Request) {
 	id, _ := ctxid.Must(r.Context())
-	if err := m.transition(r.Context(), id.TenantID, chi.URLParam(r, "id"), "executing", "paused", "mission paused"); err != nil {
+	missionID := chi.URLParam(r, "id")
+	if err := m.transition(r.Context(), id.TenantID, missionID, "executing", "paused", "mission paused"); err != nil {
 		httpx.Respond(w, r, nil, err)
 		return
+	}
+	if row, err := m.fetchMission(r.Context(), id.TenantID, missionID); err == nil {
+		m.dispatchDevice(r.Context(), id.TenantID, row.DeviceID, missionID, "pause", map[string]any{})
 	}
 	httpx.Respond(w, r, map[string]any{"status": "paused"}, nil)
 }
 
 func (m *Module) resumeMission(w http.ResponseWriter, r *http.Request) {
 	id, _ := ctxid.Must(r.Context())
-	if err := m.transition(r.Context(), id.TenantID, chi.URLParam(r, "id"), "paused", "executing", "mission resumed"); err != nil {
+	missionID := chi.URLParam(r, "id")
+	if err := m.transition(r.Context(), id.TenantID, missionID, "paused", "executing", "mission resumed"); err != nil {
 		httpx.Respond(w, r, nil, err)
 		return
+	}
+	if row, err := m.fetchMission(r.Context(), id.TenantID, missionID); err == nil {
+		m.dispatchDevice(r.Context(), id.TenantID, row.DeviceID, missionID, "resume", map[string]any{})
 	}
 	httpx.Respond(w, r, map[string]any{"status": "executing"}, nil)
 }
@@ -234,6 +245,7 @@ func (m *Module) stopMission(w http.ResponseWriter, r *http.Request) {
 		httpx.Respond(w, r, nil, err)
 		return
 	}
+	m.dispatchDevice(r.Context(), id.TenantID, row.DeviceID, missionID, "stop", map[string]any{})
 	m.recordMissionTrace(r.Context(), id.TenantID, missionID, "mission", "Mission stopped")
 	httpx.Respond(w, r, map[string]any{"status": "completed"}, nil)
 }

@@ -331,9 +331,9 @@ func (s *seeder) devices(ctx context.Context, batchID string) error {
 		tokens[d.code] = token
 		if _, err := s.pool.Exec(ctx, `
 			INSERT INTO devices (id, tenant_id, name, code, device_type, status, capabilities,
-				token_hash, location, battery_level, firmware, created_by)
+				token_hash, location, battery_level, firmware, adapter_type, created_by)
 			VALUES ($1,$2,$3,$4,$5,'offline',$6,$7,
-				ST_SetSRID(ST_MakePoint($8,$9),4326), 95,'v1.0.0','seed')`,
+				ST_SetSRID(ST_MakePoint($8,$9),4326), 95,'v1.0.0','generic-mqtt','seed')`,
 			deviceID, s.tenantID, d.name, d.code, d.dtype, d.caps,
 			hashToken(token), d.lng, d.lat); err != nil {
 			return err

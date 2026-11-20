@@ -101,8 +101,11 @@ tests/e2e/         冒烟测试脚本
 
 ## Roadmap
 
-Phase 0/1（本仓库已完成）→ Phase 2 IoT/设备增强 → Phase 3 MAVLink/ROS2/DJI/XAG Adapter →
-Phase 4 遥感（WebODM/STAC/NDVI） → Phase 5 官方溯源平台接入 → Phase 6 AI（RAG/Vision）。
+Phase 0/1（本仓库已完成，含**真机执行链路**：mission 状态提交后经 `device.Registry` 按适配器分发指令）
+→ Phase 3 设备适配器接入：**MAVLink**（SITL 可真测）→ **ROS 2 rosbridge**（无人车）→
+**DJI 上云API**（需企业凭证，凭证位已预留）→ **XAG**（需商业授权）
+→ Phase 2 IoT 增强 → Phase 4 遥感（WebODM/STAC/NDVI） → Phase 5 官方溯源平台接入 → Phase 6 AI（RAG/Vision）。
+实现任一厂商适配器 = 实现 `device.Adapter` 接口 + 注册一行，核心零改动（[ADR-005](docs/adr/adr-005-mission-device-dispatch.md)）。
 详见 [specs/14-ROADMAP.md](specs/14-ROADMAP.md) 与 [specs/24-PHASE0-IMPLEMENTATION-DECISIONS.md](specs/24-PHASE0-IMPLEMENTATION-DECISIONS.md)。
 
 ## 文档

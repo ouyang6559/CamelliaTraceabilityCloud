@@ -18,6 +18,12 @@ UAV                   UAV/UGV  Robot
 
 ## 2. DeviceAdapter
 
+> **落地状态（2026-11-21）**：SDK 契约位于 `adapters/device/deviceadapter.go`；
+> mission 执行链路已接通适配器分发（`device.Registry`，见 docs/adr/adr-005）——
+> 任务 start/pause/resume/stop 会在本地状态提交后经 `adapter_type` 调用对应适配器，
+> NATS 广播保留。已注册适配器：`generic-mqtt`（参考实现）；DJI/XAG/MAVLink/ROS2
+> 待官方 SDK/API/授权（不得伪造）。
+
 建议接口：
 
 ```go

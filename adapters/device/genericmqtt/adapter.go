@@ -24,10 +24,10 @@ import (
 // Manifest returns the adapter registration descriptor.
 func Manifest() device.Manifest {
 	return device.Manifest{
-		Name:    "generic-mqtt",
-		Version: "0.1.0",
-		Type:    "device",
-		Vendor:  "ctc",
+		Name:      "generic-mqtt",
+		Version:   "0.1.0",
+		Type:      "device",
+		Vendor:    "ctc",
 		Protocols: []string{"mqtt"},
 		Capabilities: []string{
 			device.CapTelemetry, device.CapGPS, device.CapMission,
@@ -70,8 +70,20 @@ func New(brokerURL string, log *slog.Logger) (*Adapter, error) {
 	}, nil
 }
 
-func topic(tenant, code, suffix string) string {
+// Topic renders the platform device topic. Exported so integrators reuse the
+// exact contract shared with the API-side ingest (apps/api device module).
+func Topic(tenant, code, suffix string) string {
 	return fmt.Sprintf("ctc/v1/tenants/%s/devices/%s/%s", tenant, code, suffix)
+}
+
+// tenantOf resolves the tenant scope for publishing. Devices declare their
+// tenant in Device.Metadata["tenant"] (injected at registration time); the
+// historical hardcoded tenants were a bug — see docs/adr/adr-005.
+func tenantOf(d device.Device) string {
+	if v, ok := d.Metadata["tenant"]; ok && v != "" {
+		return v
+	}
+	return "default"
 }
 
 func (a *Adapter) publish(tenant, code, suffix string, payload any) error {
@@ -79,7 +91,7 @@ func (a *Adapter) publish(tenant, code, suffix string, payload any) error {
 	if err != nil {
 		return err
 	}
-	tok := a.client.Publish(topic(tenant, code, suffix), 0, false, data)
+	tok := a.client.Publish(Topic(tenant, code, suffix), 0, false, data)
 	if !tok.WaitTimeout(5*time.Second) || tok.Error() != nil {
 		if tok.Error() != nil {
 			return tok.Error()
@@ -128,13 +140,13 @@ func (a *Adapter) GetTelemetry(_ context.Context, _ device.Device) (*device.Tele
 }
 
 func (a *Adapter) SendCommand(_ context.Context, d device.Device, cmd device.Command) error {
-	return a.publish("cmd-tenant", d.Code, "commands", map[string]any{
+	return a.publish(tenantOf(d), d.Code, "commands", map[string]any{
 		"name": cmd.Name, "params": cmd.Params, "ts": time.Now().UnixMilli(),
 	})
 }
 
 func (a *Adapter) CreateMission(_ context.Context, d device.Device, mission device.Mission) error {
-	if err := a.publish("", d.Code, "missions", mission); err != nil {
+	if err := a.publish(tenantOf(d), d.Code, "missions", mission); err != nil {
 		return err
 	}
 	a.mu.Lock()
@@ -144,7 +156,7 @@ func (a *Adapter) CreateMission(_ context.Context, d device.Device, mission devi
 }
 
 func (a *Adapter) StartMission(_ context.Context, d device.Device, missionID string) error {
-	if err := a.publish("", d.Code, "missions/"+missionID+"/start", map[string]any{"ts": time.Now().UnixMilli()}); err != nil {
+	if err := a.publish(tenantOf(d), d.Code, "missions/"+missionID+"/start", map[string]any{"ts": time.Now().UnixMilli()}); err != nil {
 		return err
 	}
 	a.mu.Lock()
@@ -159,7 +171,7 @@ func (a *Adapter) PauseMission(_ context.Context, d device.Device, missionID str
 		ms.State = "paused"
 	}
 	a.mu.Unlock()
-	return a.publish("", d.Code, "missions/"+missionID+"/pause", map[string]any{})
+	return a.publish(tenantOf(d), d.Code, "missions/"+missionID+"/pause", map[string]any{})
 }
 
 func (a *Adapter) ResumeMission(_ context.Context, d device.Device, missionID string) error {
@@ -168,14 +180,14 @@ func (a *Adapter) ResumeMission(_ context.Context, d device.Device, missionID st
 		ms.State = "executing"
 	}
 	a.mu.Unlock()
-	return a.publish("", d.Code, "missions/"+missionID+"/resume", map[string]any{})
+	return a.publish(tenantOf(d), d.Code, "missions/"+missionID+"/resume", map[string]any{})
 }
 
 func (a *Adapter) StopMission(_ context.Context, d device.Device, missionID string) error {
 	a.mu.Lock()
 	a.missions[missionID] = &device.MissionStatus{State: "completed", Progress: 100}
 	a.mu.Unlock()
-	return a.publish("", d.Code, "missions/"+missionID+"/stop", map[string]any{})
+	return a.publish(tenantOf(d), d.Code, "missions/"+missionID+"/stop", map[string]any{})
 }
 
 func (a *Adapter) GetMission(_ context.Context, _ device.Device, missionID string) (*device.MissionStatus, error) {

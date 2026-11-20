@@ -27,10 +27,41 @@ import (
 
 // Module wires mission and geofence routes.
 type Module struct {
-	pool     *pgxpool.Pool
-	traceSvc *trace.Service
-	pub      *events.Publisher
-	devices  DeviceEventRecorder
+	pool       *pgxpool.Pool
+	traceSvc   *trace.Service
+	pub        *events.Publisher
+	devices    DeviceEventRecorder
+	dispatcher MissionDispatcher
+}
+
+// MissionDispatcher sends mission lifecycle commands to the device through its
+// DeviceAdapter (implemented by the device module Registry; specs/20). Local
+// First: dispatch failures never roll back the committed mission state.
+type MissionDispatcher interface {
+	DispatchMission(ctx context.Context, tenantID, deviceID, missionID, action string, payload map[string]any) error
+}
+
+// SetDeviceDispatcher wires the adapter registry (app assembly).
+func (m *Module) SetDeviceDispatcher(d MissionDispatcher) { m.dispatcher = d }
+
+// dispatchDevice best-effort dispatches a lifecycle command; a failure is
+// recorded as a mission_event for operator retry but never fails the request
+// (the local state transition already committed, specs/01.7).
+func (m *Module) dispatchDevice(ctx context.Context, tenantID, deviceID, missionID, action string, payload map[string]any) {
+	if m.dispatcher == nil || deviceID == "" {
+		return
+	}
+	if err := m.dispatcher.DispatchMission(ctx, tenantID, deviceID, missionID, action, payload); err != nil {
+		_, _ = m.pool.Exec(ctx, `
+			INSERT INTO mission_events (id, tenant_id, mission_id, type, message, payload, occurred_at)
+			VALUES ($1,$2,$3,'dispatch_failed',$4,to_jsonb($5::jsonb),now())`,
+			ulidx.New(), tenantID, missionID,
+			"device dispatch failed: "+err.Error(),
+			marshalExtra([]any{map[string]any{"action": action}}))
+		m.pub.Publish(tenantID, "mission.updated", map[string]any{
+			"mission_id": missionID, "dispatch_error": err.Error(),
+		})
+	}
 }
 
 // DeviceEventRecorder is the subset of the device module used by missions.

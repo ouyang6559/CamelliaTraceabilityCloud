@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	sdk "github.com/ouyang6559/CamelliaTraceabilityCloud/adapters/device"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/apierr"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/ctxid"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/events"
@@ -34,11 +35,16 @@ type Module struct {
 	pub      *events.Publisher
 	log      *slog.Logger
 	evalRule AlertEvaluator
+	registry *Registry
 }
 
 func NewModule(pool *pgxpool.Pool, pub *events.Publisher, log *slog.Logger) *Module {
 	return &Module{pool: pool, pub: pub, log: log}
 }
+
+// SetRegistry wires the DeviceAdapter registry (app assembly); required for
+// the command endpoint. specs/20: vendor logic stays behind the SDK interface.
+func (m *Module) SetRegistry(r *Registry) { m.registry = r }
 
 // SetAlertEvaluator wires the alert rule evaluator (called during app assembly).
 func (m *Module) SetAlertEvaluator(fn AlertEvaluator) { m.evalRule = fn }
@@ -67,6 +73,7 @@ func (m *Module) Mount(r chi.Router, auth func(http.Handler) http.Handler,
 		rr.With(authorize("telemetry", "read")).Get("/{id}/telemetry", m.deviceTelemetry)
 		rr.With(authorize("telemetry", "read")).Get("/{id}/latest", m.deviceLatest)
 		rr.With(authorize("device", "read")).Get("/{id}/events", m.deviceEvents)
+		rr.With(authorize("device", "update")).Post("/{id}/commands", m.sendCommand)
 	})
 
 }
@@ -436,6 +443,48 @@ func mapDeviceErr(err error) error {
 		return apierr.Conflict("device code already exists")
 	}
 	return err
+}
+
+// commandWhitelist lists the non-high-risk device commands callable directly.
+// specs/03.10: takeoff/land/spray/mow/plow/autonomous/remote-control are
+// high-risk and MUST go through the mission safety pipeline instead — they are
+// deliberately rejected here (ADR-003/ADR-005).
+var commandWhitelist = map[string]bool{
+	"ping": true, "locate": true, "sync_logs": true,
+	"led_on": true, "led_off": true, "charge_start": true, "charge_stop": true,
+}
+
+func (m *Module) sendCommand(w http.ResponseWriter, r *http.Request) {
+	id, err := ctxid.Must(r.Context())
+	if err != nil {
+		httpx.Respond(w, r, nil, err)
+		return
+	}
+	var req struct {
+		Name   string            `json:"name"`
+		Params map[string]string `json:"params"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.Respond(w, r, nil, err)
+		return
+	}
+	if !commandWhitelist[req.Name] {
+		httpx.Respond(w, r, nil, apierr.Invalid(
+			"command %q is not allowed on this endpoint; high-risk actions must go through the mission pipeline (specs/03.10)", req.Name))
+		return
+	}
+	if m.registry == nil {
+		httpx.Respond(w, r, nil, apierr.Unavailable("device adapter registry not configured"))
+		return
+	}
+	if err := m.registry.SendCommand(r.Context(), id.TenantID, chi.URLParam(r, "id"), sdk.Command{
+		Name:   req.Name,
+		Params: req.Params,
+	}); err != nil {
+		httpx.Respond(w, r, nil, err)
+		return
+	}
+	httpx.Respond(w, r, map[string]any{"sent": true, "command": req.Name}, nil)
 }
 
 func newDeviceToken() string { return "ctc_" + ulidx.New() + ulidx.New()[:12] }

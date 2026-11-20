@@ -149,6 +149,13 @@ paths:
     get: { tags: [device], summary: Latest state + last telemetry, responses: { "200": { description: OK } } }
   /devices/{id}/rotate-token:
     post: { tags: [device], summary: Issue new device token (shown once), responses: { "200": { description: token } } }
+  /devices/{id}/commands:
+    post:
+      tags: [device]
+      summary: Send a NON-high-risk device command via its DeviceAdapter (whitelist: ping/locate/sync_logs/led_*/charge_*); high-risk actions must go through /missions pipeline
+      responses:
+        "200": { description: sent }
+        "400": { $ref: "#/components/responses/Error" }
   /devices/geojson:
     get: { tags: [device], summary: Device map (GeoJSON), responses: { "200": { description: FeatureCollection } } }
   /device-gateway/telemetry:
