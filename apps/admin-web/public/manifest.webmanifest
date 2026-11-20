@@ -1,0 +1,18 @@
+{
+  "name": "茶源智控溯源云 CamelliaTraceabilityCloud",
+  "short_name": "茶源智控",
+  "description": "开放农业数字基础设施：农事、IoT、GIS、无人机、可信溯源、一物一码",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "lang": "zh-CN",
+  "background_color": "#f1f8e9",
+  "theme_color": "#2e7d32",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

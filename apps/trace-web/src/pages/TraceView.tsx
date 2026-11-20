@@ -101,7 +101,8 @@ export default function TraceView() {
   return (
     <div style={{ maxWidth: 720, margin: '0 auto', padding: '24px 16px 48px' }}>
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
-        <Typography.Title level={3} style={{ marginBottom: 4 }}>🍃 茶源智控溯源云</Typography.Title>
+        <img src="/logo.svg" alt="CTC logo" style={{ width: 56, height: 56, borderRadius: 12, marginBottom: 8 }} />
+        <Typography.Title level={3} style={{ marginBottom: 4 }}>茶源智控溯源云</Typography.Title>
         <Typography.Text type="secondary">CamelliaTraceabilityCloud · 产品溯源档案</Typography.Text>
       </div>
 
@@ -133,7 +134,7 @@ export default function TraceView() {
 
       <Card title="生产过程 Production Timeline" size="small" style={{ marginBottom: 16 }}>
         <Timeline
-          items={data.timeline.map((e) => ({
+          items={(data.timeline ?? []).map((e) => ({
             color: e.event_type === 'quality_test' ? 'green' : 'blue',
             children: (
               <div style={{ paddingBottom: 4 }}>
@@ -151,15 +152,15 @@ export default function TraceView() {
         />
       </Card>
 
-      {data.evidence.length > 0 ? (
+      {(data.evidence ?? []).length > 0 ? (
         <Card title="过程影像 Evidence" size="small" style={{ marginBottom: 16 }}>
           <Space wrap>
-            {data.evidence.filter((e) => e.url && e.evidence_type === 'photo').map((e) => (
+            {(data.evidence ?? []).filter((e) => e.url && e.evidence_type === 'photo').map((e) => (
               <Image key={e.id} width={120} src={e.url} fallback="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTIwIj48dGV4dCB4PSI2MCIgeT0iNjUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iMTQiIGZpbGw9IiM5OTkiPuWBh+aooTwvdGV4dD48L3N2Zz4=" />
             ))}
           </Space>
           <div style={{ marginTop: 8 }}>
-            {data.evidence.map((e) => (
+            {(data.evidence ?? []).map((e) => (
               <div key={e.id} style={{ fontSize: 12, color: '#888' }}>
                 <FileImageOutlined /> {e.filename || e.evidence_type} ·
                 SHA-256: <span className="mono">{e.sha256.slice(0, 16)}…</span>
@@ -189,7 +190,7 @@ export default function TraceView() {
           </Button>
         }
       >
-        {data.proofs.length === 0 ? (
+        {(data.proofs ?? []).length === 0 ? (
           <Typography.Text type="secondary">该批次暂未上链存证（可由企业端发起区块链存证）</Typography.Text>
         ) : (
           data.proofs.map((p, i) => (

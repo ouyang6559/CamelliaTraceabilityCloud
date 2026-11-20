@@ -38,9 +38,15 @@ export default function Login() {
       background: 'linear-gradient(135deg, #e8f5e9 0%, #f1f8e9 50%, #ffffff 100%)',
     }}>
       <Card style={{ width: 420, boxShadow: '0 8px 32px rgba(46,125,50,.12)' }}>
-        <Typography.Title level={3} style={{ textAlign: 'center', marginBottom: 4 }}>
-          {t('app.name')}
-        </Typography.Title>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, marginBottom: 8 }}>
+          <img src="/logo.svg" alt="CTC logo" style={{ width: 64, height: 64, borderRadius: 14 }} />
+          <Typography.Title level={3} style={{ margin: '8px 0 0' }}>
+            {t('app.name')}
+          </Typography.Title>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            CamelliaTraceabilityCloud · {t('app.subtitle')}
+          </Typography.Text>
+        </div>
         <Typography.Paragraph type="secondary" style={{ textAlign: 'center' }}>
           {t('login.welcome')}
         </Typography.Paragraph>

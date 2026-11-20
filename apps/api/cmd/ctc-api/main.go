@@ -25,7 +25,7 @@ func main() {
 		cfg.Mode = *mode
 	}
 	log := cfg.Logger()
-	log.Info("camellia traceability cloud api", "mode", cfg.Mode, "addr", cfg.HTTPAddr)
+	log.Info("CTC · 茶源智控溯源云 CamelliaTraceabilityCloud", "mode", cfg.Mode, "addr", cfg.HTTPAddr)
 
 	if cfg.JWTSecret == "dev-insecure-jwt-secret-change-me" {
 		log.Warn("CTC_JWT_SECRET not set; using development default — do not use in production")

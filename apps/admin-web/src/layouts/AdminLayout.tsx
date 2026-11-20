@@ -144,13 +144,14 @@ export default function AdminLayout() {
         trigger={null}
         theme="dark"
         width={228}
+        style={{ display: 'flex', flexDirection: 'column' }}
       >
-        <div style={{ height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-          <span style={{ fontSize: 22 }}>🍃</span>
+        <div style={{ height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '0 8px' }}>
+          <img src="/logo.svg" alt="CTC logo" style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0 }} />
           {!collapsed && screens.md && (
-            <Typography.Text strong style={{ color: '#fff', fontSize: 15 }}>
+            <span style={{ color: '#fff', fontSize: 15, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden' }}>
               {t('app.name')}
-            </Typography.Text>
+            </span>
           )}
         </div>
         <Menu
@@ -160,7 +161,16 @@ export default function AdminLayout() {
           selectedKeys={[location.pathname]}
           defaultOpenKeys={screens.md ? ['production', 'devices', 'processing', 'trace'] : []}
           onClick={({ key }) => navigate(String(key))}
+          style={{ flex: 1, overflowY: 'auto' }}
         />
+        {!collapsed && screens.md && (
+          <div style={{
+            color: 'rgba(255,255,255,.45)', fontSize: 11, textAlign: 'center',
+            padding: '10px 0 14px', userSelect: 'none',
+          }}>
+            CTC · v0.1.0
+          </div>
+        )}
       </Sider>
       <Layout>
         <Header style={{

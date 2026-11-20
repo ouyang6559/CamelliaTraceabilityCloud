@@ -1,6 +1,8 @@
 <div align="center">
 
-# 🍃 茶源智控溯源云 CamelliaTraceabilityCloud
+<img src="docs/assets/logo.svg" alt="CamelliaTraceabilityCloud logo" width="88" />
+
+# 茶源智控溯源云 CamelliaTraceabilityCloud
 
 **Open Agriculture Digital Infrastructure / 开放农业数字基础设施**
 

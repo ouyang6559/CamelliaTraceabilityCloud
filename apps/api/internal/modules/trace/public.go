@@ -110,7 +110,7 @@ func (api *API) consumerSummary(ctx context.Context, tenantID, refType, refID st
 // chainEvents collects trace events for the whole upstream chain, oldest first.
 func (api *API) chainEvents(ctx context.Context, tenantID, refType, refID string) ([]map[string]any, error) {
 	curType, curID := refType, refID
-	var all []map[string]any
+	all := []map[string]any{}
 	for i := 0; i < 12 && curType != "" && curID != ""; i++ {
 		rows, err := api.svc.pool.Query(ctx, `
 			SELECT event_type, event_time, title, description, quantity::float8 AS quantity, unit, sequence, hash
@@ -134,7 +134,7 @@ func (api *API) chainEvents(ctx context.Context, tenantID, refType, refID string
 // chainEvidence resolves media evidence files for events on the chain.
 func (api *API) chainEvidence(ctx context.Context, tenantID, refType, refID string) ([]map[string]any, error) {
 	curType, curID := refType, refID
-	var all []map[string]any
+	all := []map[string]any{}
 	for i := 0; i < 12 && curType != "" && curID != ""; i++ {
 		rows, err := api.svc.pool.Query(ctx, `
 			SELECT e.id, e.evidence_type, e.filename, e.mime, e.sha256, e.captured_at, f.id AS file_id
