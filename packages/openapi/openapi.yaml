@@ -1,0 +1,284 @@
+openapi: 3.0.3
+info:
+  title: CamelliaTraceabilityCloud API
+  description: |
+    茶源智控溯源云 — Open Agriculture Digital Infrastructure.
+
+    API conventions (specs/09): ULID ids, ISO-8601 UTC timestamps,
+    page/page_size pagination, unified error envelope
+    `{ code, message, details?, request_id }`, Idempotency-Key on critical writes
+    (device-gateway, trace, sync).
+    This file is the hand-maintained Phase 0/1 contract; from Phase 2 it will be
+    generated from Proto (see specs/24 ADR-001).
+  version: 0.1.0
+  license:
+    name: Apache-2.0
+
+servers:
+  - url: /api/v1
+    description: local / compose
+
+tags:
+  - name: auth
+  - name: identity
+  - name: agriculture
+  - name: production
+  - name: trace
+  - name: evidence
+  - name: device
+  - name: mission
+  - name: iot
+  - name: alert
+  - name: quality
+  - name: sync
+  - name: ai
+  - name: system
+
+paths:
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Login (username + password, optional tenant_code)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string }
+                tenant_code: { type: string }
+      responses:
+        "200":
+          description: user + token pair (access JWT 30min / refresh 7d)
+        "401": { $ref: "#/components/responses/Error" }
+  /auth/refresh:
+    post: { tags: [auth], summary: Rotate refresh token, responses: { "200": { description: new pair } } }
+  /auth/me:
+    get: { tags: [auth], summary: Current user, tenant and permission codes, responses: { "200": { description: OK } } }
+
+  /users: { $ref: "#/components/pathBlocks/standardCollection" }
+  /roles:
+    get: { tags: [identity], summary: List roles with permissions, responses: { "200": { description: OK } } }
+  /roles/permissions:
+    get: { tags: [identity], summary: Permission catalog, responses: { "200": { description: OK } } }
+  /tenants/current:
+    get: { tags: [identity], summary: Own tenant, responses: { "200": { description: OK } } }
+
+  /farms: { $ref: "#/components/pathBlocks/standardCollection" }
+  /plots: { $ref: "#/components/pathBlocks/standardCollection" }
+  /geojson/plots:
+    get: { tags: [agriculture], summary: Plot boundaries as GeoJSON FeatureCollection, responses: { "200": { description: OK } } }
+  /crops: { $ref: "#/components/pathBlocks/standardCollection" }
+  /varieties: { $ref: "#/components/pathBlocks/standardCollection" }
+  /crop-batches: { $ref: "#/components/pathBlocks/standardCollection" }
+  /agricultural-tasks:
+    get: { tags: [agriculture], summary: List tasks (filter status/type/plot/crop_batch), responses: { "200": { description: OK } } }
+    post: { tags: [agriculture], summary: Create task, responses: { "201": { description: Created } } }
+  /agricultural-tasks/{id}/start:
+    post: { tags: [agriculture], summary: planned -> in_progress, responses: { "200": { description: OK } } }
+  /agricultural-tasks/{id}/complete:
+    post:
+      tags: [agriculture]
+      summary: Complete task + record + TraceEvent (hash chain)
+      responses: { "200": { description: task + record_id } }
+  /inputs: { $ref: "#/components/pathBlocks/standardCollection" }
+  /input-batches: { $ref: "#/components/pathBlocks/standardCollection" }
+  /input-usages:
+    get: { tags: [agriculture], summary: List usages, responses: { "200": { description: OK } } }
+    post: { tags: [agriculture], summary: Record usage (decrements batch stock), responses: { "201": { description: Created } } }
+  /disease-records: { $ref: "#/components/pathBlocks/standardCollection" }
+  /disease-pests:
+    get: { tags: [agriculture], summary: Disease/pest dictionary, responses: { "200": { description: OK } } }
+
+  /harvests: { $ref: "#/components/pathBlocks/standardCollection" }
+  /harvests/{id}/accept:
+    post: { tags: [production], summary: Convert harvest -> raw material batch (+ trace events), responses: { "201": { description: Created } } }
+  /raw-material-batches: { $ref: "#/components/pathBlocks/standardCollection" }
+  /processing-batches: { $ref: "#/components/pathBlocks/standardCollection" }
+  /processing-batches/{id}/complete:
+    post: { tags: [production], summary: Close processing batch (+ trace event), responses: { "200": { description: OK } } }
+  /products: { $ref: "#/components/pathBlocks/standardCollection" }
+  /product-batches: { $ref: "#/components/pathBlocks/standardCollection" }
+  /packages: { $ref: "#/components/pathBlocks/standardCollection" }
+  /warehouses: { $ref: "#/components/pathBlocks/standardCollection" }
+  /inventory:
+    get: { tags: [production], summary: Inventory items, responses: { "200": { description: OK } } }
+  /inventory/movements:
+    post: { tags: [production], summary: Stock movement (in/out/adjust), responses: { "201": { description: Created } } }
+  /logistics: { $ref: "#/components/pathBlocks/standardCollection" }
+
+  /trace-events:
+    get: { tags: [trace], summary: List trace events (ref_type/ref_id/crop_batch/plot/from/to), responses: { "200": { description: OK } } }
+    post: { tags: [trace], summary: Append manual event (joins tenant hash chain), responses: { "201": { description: sequence/prev_hash/hash } } }
+  /trace-events/verify-chain:
+    post: { tags: [trace], summary: Recompute SHA-256 chain; reports first break, responses: { "200": { description: valid + count or break_at } } }
+  /trace-codes:
+    get: { tags: [trace], summary: List codes, responses: { "200": { description: OK } } }
+    post: { tags: [trace], summary: Mint 1..500 codes for a business object, responses: { "201": { description: items } } }
+  /trace-codes/{code}:
+    get: { tags: [trace], summary: Get one code, responses: { "200": { description: OK } } }
+  /trace-graph:
+    get: { tags: [trace], summary: Upstream chain graph (package->...->plot) with event counts, responses: { "200": { description: nodes+edges } } }
+
+  /public/trace/{code}:
+    get:
+      tags: [trace]
+      summary: Consumer trace payload (no auth; increments scan counter)
+      responses: { "200": { description: summary + timeline + evidence + proofs } }
+  /public/trace/{code}/verify:
+    get: { tags: [trace], summary: Consumer verification (proofs), responses: { "200": { description: valid + proofs } } }
+  /public/trace-media/{fileId}:
+    get: { tags: [trace], summary: Evidence media for traceable chains, responses: { "200": { description: file } } }
+
+  /evidence:
+    get: { tags: [evidence], summary: List evidence, responses: { "200": { description: OK } } }
+    post: { tags: [evidence], summary: Link uploaded file as evidence (SHA-256 recorded), responses: { "201": { description: id + sha256 } } }
+  /evidence/verify:
+    post: { tags: [evidence], summary: Recompute object hash vs stored digest, responses: { "200": { description: valid } } }
+  /blockchain-proofs:
+    get: { tags: [evidence], summary: List proofs, responses: { "200": { description: OK } } }
+    post: { tags: [evidence], summary: Anchor hash to provider (mock default), responses: { "201": { description: tx/height } } }
+
+  /devices: { $ref: "#/components/pathBlocks/standardCollection" }
+  /devices/{id}/telemetry:
+    get: { tags: [device], summary: Raw telemetry window, responses: { "200": { description: OK } } }
+  /devices/{id}/latest:
+    get: { tags: [device], summary: Latest state + last telemetry, responses: { "200": { description: OK } } }
+  /devices/{id}/rotate-token:
+    post: { tags: [device], summary: Issue new device token (shown once), responses: { "200": { description: token } } }
+  /devices/geojson:
+    get: { tags: [device], summary: Device map (GeoJSON), responses: { "200": { description: FeatureCollection } } }
+  /device-gateway/telemetry:
+    post:
+      tags: [device]
+      summary: HTTPS telemetry ingest (device_code + token; mirrors MQTT topic ctc/v1/tenants/{tid}/devices/{code}/telemetry)
+      responses: { "200": { description: accepted }, "401": { $ref: "#/components/responses/Error" } }
+  /device-gateway/missions/{id}/progress:
+    post: { tags: [device], summary: Device-reported mission progress (completes at 100), responses: { "200": { description: accepted } } }
+
+  /missions: { $ref: "#/components/pathBlocks/standardCollection" }
+  /missions/{id}/validate:
+    post: { tags: [mission], summary: draft -> safety_check (capability check), responses: { "200": { description: OK } } }
+  /missions/{id}/safety-check:
+    post: { tags: [mission], summary: Run safety engine (geofence/battery/route) -> awaiting_confirmation, responses: { "200": { description: checks } } }
+  /missions/{id}/approve:
+    post: { tags: [mission], summary: Human approval (mission:approve permission required), responses: { "200": { description: OK } } }
+  /missions/{id}/start:
+    post: { tags: [mission], summary: approved -> executing + NATS mission.started, responses: { "200": { description: OK } } }
+  /missions/{id}/pause:
+    post: { tags: [mission], summary: executing -> paused, responses: { "200": { description: OK } } }
+  /missions/{id}/resume:
+    post: { tags: [mission], summary: paused -> executing, responses: { "200": { description: OK } } }
+  /missions/{id}/stop:
+    post: { tags: [mission], summary: executing/paused -> completed, responses: { "200": { description: OK } } }
+  /missions/{id}/cancel:
+    post: { tags: [mission], summary: Cancel from any non-terminal state, responses: { "200": { description: OK } } }
+  /missions/{id}/progress:
+    post: { tags: [mission], summary: Record progress (0-100; 100 completes), responses: { "200": { description: OK } } }
+  /missions/{id}/events:
+    get: { tags: [mission], summary: Mission event log, responses: { "200": { description: OK } } }
+  /geofences: { $ref: "#/components/pathBlocks/standardCollection" }
+
+  /sensors:
+    get: { tags: [iot], summary: Sensors (SensorThings-lite), responses: { "200": { description: OK } } }
+  /datastreams:
+    get: { tags: [iot], summary: Datastreams, responses: { "200": { description: OK } } }
+  /datastreams/{id}/observations:
+    get: { tags: [iot], summary: Time series for a datastream, responses: { "200": { description: OK } } }
+  /observations:
+    get: { tags: [iot], summary: Observations (datastream/device/observed_property/from/to), responses: { "200": { description: OK } } }
+
+  /alerts:
+    get: { tags: [alert], summary: Alerts (status/severity/device), responses: { "200": { description: OK } } }
+  /alerts/{id}/acknowledge:
+    post: { tags: [alert], summary: Acknowledge, responses: { "204": { description: No Content } } }
+  /alerts/{id}/resolve:
+    post: { tags: [alert], summary: Resolve, responses: { "204": { description: No Content } } }
+  /alert-rules: { $ref: "#/components/pathBlocks/standardCollection" }
+
+  /quality-tests: { $ref: "#/components/pathBlocks/standardCollection" }
+  /quality-reports: { $ref: "#/components/pathBlocks/standardCollection" }
+
+  /external-platforms: { $ref: "#/components/pathBlocks/standardCollection" }
+  /external-platforms/{id}/test:
+    post: { tags: [sync], summary: Probe provider reachability, responses: { "200": { description: reachable } } }
+  /sync-tasks:
+    get: { tags: [sync], summary: Sync tasks (LOCAL_ONLY/PENDING/SYNCING/SYNCED/FAILED/RETRYING), responses: { "200": { description: OK } } }
+    post: { tags: [sync], summary: Enqueue (idempotency_key = task id), responses: { "201": { description: Created } } }
+  /sync-tasks/run:
+    post: { tags: [sync], summary: Run worker once (background worker also runs on interval), responses: { "200": { description: ok } } }
+  /sync-tasks/{id}/retry:
+    post: { tags: [sync], summary: Requeue failed task, responses: { "204": { description: No Content } } }
+  /sync-tasks/{id}/logs:
+    get: { tags: [sync], summary: Sync log, responses: { "200": { description: OK } } }
+
+  /ai/chat:
+    post: { tags: [ai], summary: Chat via provider (mock | openai-compatible); output labeled with output_type + confidence, responses: { "200": { description: output } } }
+  /ai/vision:
+    post: { tags: [ai], summary: Vision analysis of uploaded media, responses: { "200": { description: output } } }
+  /ai/jobs:
+    get: { tags: [ai], summary: AI job history + reviews, responses: { "200": { description: OK } } }
+  /ai/jobs/{id}/review:
+    post: { tags: [ai], summary: Human approve/reject of AI recommendation, responses: { "204": { description: No Content } } }
+
+  /files:
+    post: { tags: [system], summary: Multipart upload -> {id, sha256}, responses: { "201": { description: Created } } }
+  /files/{id}/content:
+    get: { tags: [system], summary: Download (owner tenant), responses: { "200": { description: file } } }
+  /stream:
+    get: { tags: [system], summary: Server-Sent Events (NATS domain events, tenant-scoped), responses: { "200": { description: text/event-stream } } }
+  /audit-logs:
+    get: { tags: [system], summary: Audit trail (all writes recorded at transport level), responses: { "200": { description: OK } } }
+  /dashboard/summary:
+    get: { tags: [system], summary: Workbench stats, responses: { "200": { description: OK } } }
+
+components:
+  responses:
+    Error:
+      description: Unified error envelope
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  pathBlocks:
+    standardCollection:
+      get:
+        summary: List (page/page_size/search/sort + resource filters)
+        responses:
+          "200":
+            description: Page envelope
+            content:
+              application/json:
+                schema:
+                  $ref: "#/components/schemas/Page"
+      post:
+        summary: Create
+        responses:
+          "201": { description: Created }
+  schemas:
+    Error:
+      type: object
+      properties:
+        code: { type: string, example: INVALID_ARGUMENT }
+        message: { type: string }
+        details: {}
+        request_id: { type: string }
+    Page:
+      type: object
+      properties:
+        items: { type: array, items: { type: object } }
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+
+security:
+  - bearerAuth: []
+
+components.securitySchemes:
+  bearerAuth:
+    type: http
+    scheme: bearer
+    bearerFormat: JWT

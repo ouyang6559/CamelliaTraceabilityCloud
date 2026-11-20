@@ -1,0 +1,157 @@
+name: camellia-traceability-cloud
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: ctc
+      POSTGRES_PASSWORD: ctc
+      POSTGRES_DB: ctc
+    ports:
+      - "15432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ctc"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "16379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  nats:
+    image: nats:2-alpine
+    ports:
+      - "14222:4222"
+    command: ["-js"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:8222/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "11883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/#' -C 1 -W 3 || exit 1"]
+      interval: 6s
+      timeout: 5s
+      retries: 20
+
+  # Optional S3-compatible storage: `docker compose --profile s3 up -d`
+  # (requires registry access to minio/minio; local disk is the default backend).
+  minio:
+    image: minio/minio:latest
+    profiles: ["s3"]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ctc
+      MINIO_ROOT_PASSWORD: ctc-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      interval: 6s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.api
+    environment:
+      CTC_HTTP_ADDR: ":8080"
+      CTC_DATABASE_URL: postgres://ctc:ctc@postgres:5432/ctc?sslmode=disable
+      CTC_REDIS_URL: redis://redis:6379/0
+      CTC_NATS_URL: nats://nats:4222
+      CTC_MQTT_URL: tcp://mosquitto:1883
+      CTC_STORAGE_MODE: ${CTC_STORAGE_MODE:-local}
+      CTC_STORAGE_DIR: /app/data/files
+      CTC_S3_ENDPOINT: minio:9000
+      CTC_S3_BUCKET: ctc-files
+      CTC_S3_ACCESS_KEY: ctc
+      CTC_S3_SECRET_KEY: ctc-secret
+      CTC_TRACE_URL_PREFIX: http://localhost:8081/t
+      CTC_JWT_SECRET: ${CTC_JWT_SECRET:-dev-insecure-jwt-secret-change-me}
+      CTC_SEED_ADMIN_PASSWORD: ${CTC_SEED_ADMIN_PASSWORD:-admin123}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ctcdata:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      mosquitto:
+        condition: service_healthy
+    command: ["sh", "-c", "./ctc-api -mode seed && ./ctc-api"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:8080/healthz || exit 1"]
+      interval: 6s
+      timeout: 4s
+      retries: 30
+
+  admin-web:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.web
+      args:
+        APP_DIR: apps/admin-web
+        NGINX_CONF: deployments/docker/nginx/admin.conf
+    ports:
+      - "5173:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  trace-web:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.web
+      args:
+        APP_DIR: apps/trace-web
+        NGINX_CONF: deployments/docker/nginx/trace.conf
+    ports:
+      - "8081:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  simulator:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.sim
+    environment:
+      CTC_API_URL: http://api:8080
+      CTC_MQTT_URL: tcp://mosquitto:1883
+      CTC_NATS_URL: nats://nats:4222
+      CTC_SIM_CONFIG: /app/data/seed-devices.json
+    volumes:
+      - ctcdata:/app/data:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  miniodata:
+  ctcdata:

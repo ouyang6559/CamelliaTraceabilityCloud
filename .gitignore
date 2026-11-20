@@ -1,0 +1,25 @@
+# Binaries
+/bin/
+*.exe
+*.test
+*.out
+
+# Dependencies
+node_modules/
+dist/
+
+# Local env / runtime data
+.env
+.env.local
+*.local.yml
+data/
+/uploads/
+
+# IDE
+.idea/
+.vscode/
+.DS_Store
+
+# Coverage
+coverage.out
+coverage.txt

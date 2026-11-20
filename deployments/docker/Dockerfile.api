@@ -1,0 +1,16 @@
+# CamelliaTraceabilityCloud API (modular monolith) + simulator-ready data volume
+FROM golang:1.24-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/ctc-api ./apps/api/cmd/ctc-api
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/ctc-sim ./simulator/ctc-sim
+
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates tzdata wget
+WORKDIR /app
+COPY --from=build /out/ctc-api ./ctc-api
+COPY --from=build /out/ctc-sim ./ctc-sim
+EXPOSE 8080
+ENTRYPOINT ["./ctc-api"]

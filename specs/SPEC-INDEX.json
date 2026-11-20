@@ -1,0 +1,85 @@
+{
+  "project": "茶源智控溯源云 CamelliaTraceabilityCloud",
+  "code_name": "ctc",
+  "license": "Apache-2.0",
+  "documents": [
+    "00-PROJECT-OVERVIEW.md",
+    "01-ARCHITECTURE.md",
+    "02-DOMAIN-MODEL.md",
+    "03-DEVICE-PLATFORM.md",
+    "04-AGRICULTURE-GIS-IOT.md",
+    "05-TRACEABILITY.md",
+    "06-EXTERNAL-INTEGRATIONS.md",
+    "07-AI-PLATFORM.md",
+    "08-SECURITY.md",
+    "09-API-CONVENTIONS.md",
+    "10-DATABASE-SCHEMA.md",
+    "11-FRONTEND-MOBILE.md",
+    "12-DEPLOYMENT-EDGE.md",
+    "13-TESTING-QA.md",
+    "14-ROADMAP.md",
+    "15-ZCODE-IMPLEMENTATION.md",
+    "16-STANDARDS-MATRIX.md",
+    "17-MVP-ACCEPTANCE.md",
+    "18-REPO-STRUCTURE.md",
+    "19-ZCODE-MASTER-PROMPT.md",
+    "20-DEVICE-ADAPTER-SDK.md",
+    "21-TRACE-PROVIDER-SDK.md",
+    "22-CONTRIBUTING.md",
+    "23-CHANGELOG.md",
+    "24-PHASE0-IMPLEMENTATION-DECISIONS.md",
+    "README.md"
+  ],
+  "development_mode": "modular-monolith-first",
+  "primary_stack": {
+    "backend": [
+      "Go",
+      "go-kratos",
+      "Ent",
+      "PostgreSQL",
+      "PostGIS",
+      "Redis",
+      "NATS",
+      "MQTT"
+    ],
+    "frontend": [
+      "React",
+      "TypeScript",
+      "Vite",
+      "Ant Design",
+      "TanStack Query",
+      "Zustand",
+      "ECharts",
+      "MapLibre"
+    ],
+    "storage": [
+      "S3-compatible Object Storage"
+    ]
+  },
+  "core_abstractions": [
+    "DeviceAdapter",
+    "Capability",
+    "Mission",
+    "AgriculturalEvent",
+    "TraceEvent",
+    "Evidence",
+    "TraceProvider",
+    "SyncTask"
+  ],
+  "standards": [
+    "OGC API Features",
+    "OGC SensorThings",
+    "STAC",
+    "GeoJSON",
+    "GeoPackage",
+    "GeoTIFF/COG",
+    "ADAPT",
+    "ISO 11783/ISOBUS",
+    "ROS 2",
+    "MAVLink",
+    "MQTT",
+    "OpenAPI",
+    "gRPC",
+    "OpenTelemetry"
+  ]
+}
