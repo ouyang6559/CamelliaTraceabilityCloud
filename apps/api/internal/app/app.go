@@ -15,6 +15,8 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/adapters/device/genericmqtt"
+	mavlinkAdapter "github.com/ouyang6559/CamelliaTraceabilityCloud/adapters/device/mavlink"
+	rosbridgeAdapter "github.com/ouyang6559/CamelliaTraceabilityCloud/adapters/device/rosbridge"
 	traceadapter "github.com/ouyang6559/CamelliaTraceabilityCloud/adapters/trace/mock"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/config"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/middleware"
@@ -106,9 +108,11 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 	alertModule := alert.NewModule(pool, pub, log)
 	devModule.SetAlertEvaluator(alertModule.EvaluateTelemetry)
 
-	// DeviceAdapter registry (specs/20): adapters registered by adapter_type.
-	// generic-mqtt is the only built-in adapter; dji-cloud stays unregistered
-	// until official credentials exist (specs/03.6 — do not fabricate APIs).
+	// DeviceAdapter registry (specs/20, ADR-007): adapters registered by
+	// adapter_type. MAVLink targets ArduPilot/PX4 vehicles (Endpoint =
+	// udp:ip:port in device metadata); rosbridge targets ROS 2 robots
+	// (Endpoint = ws://host:9090). dji-cloud stays unregistered until official
+	// credentials exist (specs/03.6 — do not fabricate APIs).
 	deviceRegistry := device.NewRegistry(pool, log)
 	if mqttAdapter, err := genericmqtt.New(cfg.MQTTURL, log); err == nil {
 		deviceRegistry.Register("generic-mqtt", mqttAdapter)
@@ -116,6 +120,10 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 	} else {
 		log.Warn("generic-mqtt adapter unavailable; device dispatch disabled", "err", err)
 	}
+	deviceRegistry.Register("mavlink", mavlinkAdapter.New(log))
+	log.Info("device adapter registered", "type", "mavlink")
+	deviceRegistry.Register("rosbridge", rosbridgeAdapter.New(log))
+	log.Info("device adapter registered", "type", "rosbridge")
 	if cfg.DJIAppKey != "" {
 		log.Warn("DJI credentials present but the dji-cloud adapter is not implemented yet (integration TODO, specs/03.6)")
 	}

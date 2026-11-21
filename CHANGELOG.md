@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+### Added — Phase 3 设备适配器：MAVLink + ROS 2（ADR-007）
+- **MAVLink adapter**（`adapters/device/mavlink`，gomavlib v4）：ArduPilot/PX4
+  生态真机接入——遥测（GPS/高度/电池/解锁）、任务上传完整协议
+  （MISSION_COUNT→REQUEST_INT→ITEM_INT→ACK）、解锁+任务启动、暂停/恢复
+  （DO_PAUSE_CONTINUE）、停止（RTL）、命令映射（ping/locate/return_home/set_mode）
+- **ROS 2 rosbridge adapter**（`adapters/device/rosbridge`）：rosbridge v2 JSON
+  over WebSocket——订阅 /odom、/battery_state，航点逐个发布 PoseStamped 到
+  /goal_pose（Nav2 消费），/odom 到点自动推进，暂停=零速度 Twist
+- **协议级回环测试**：mock MAVLink 载具（UDP 真实帧：任务上传握手/解锁/ACK）
+  与 mock rosbridge_server（WebSocket）：无需真机即可 CI 验证
+- registry 注册 `mavlink`/`rosbridge` 适配器；`adapters/dji`、`adapters/xag`
+  目录占位（官方凭证/授权后接入，specs/03.6/06.11）
+
+## [Unreleased]
+
 ### Added — SaaS 多租户补全（ADR-006）
 - 平台管理员模型（`users.is_platform_admin` + 系统租户 `platform` + JWT `pa` claim）
 - 租户生命周期：`ProvisionTenant` 事务化开户；公开自助注册 `POST /auth/register`
