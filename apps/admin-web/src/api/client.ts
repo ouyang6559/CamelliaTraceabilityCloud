@@ -79,8 +79,8 @@ export async function listPage<T>(path: string, params: Record<string, unknown> 
   return res.data
 }
 
-export async function getJSON<T>(path: string): Promise<T> {
-  const res = await api.get<T>(path)
+export async function getJSON<T>(path: string, params?: Record<string, unknown>): Promise<T> {
+  const res = await api.get<T>(path, params ? { params } : undefined)
   return res.data
 }
 

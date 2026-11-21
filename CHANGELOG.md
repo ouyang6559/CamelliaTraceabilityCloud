@@ -2,6 +2,21 @@
 
 本项目的所有重要变更记录。格式遵循 Keep a Changelog，版本遵循 SemVer。
 
+## [Unreleased]
+
+### Added — SaaS 多租户补全（ADR-006）
+- 平台管理员模型（`users.is_platform_admin` + 系统租户 `platform` + JWT `pa` claim）
+- 租户生命周期：`ProvisionTenant` 事务化开户；公开自助注册 `POST /auth/register`
+  （`CTC_REGISTRATION_ENABLED` 开关）；平台端 `GET/POST /platform/tenants`、
+  `PATCH /platform/tenants/{id}`（停用/启用）、`POST /platform/tenants/{id}/reset-admin-password`
+- 登录多租户歧义修复：密码命中多租户返回 409 `MULTI_TENANT_AMBIGUOUS` + 租户选项（先验密防枚举）
+- 停用租户在登录/refresh 即刻拒绝（存量 token ≤30min 窗口，ADR-006）
+- 隔离加固：公开溯源媒体绑定 active trace_code、`PATCH /users/{id}` 租户归属校验、
+  `loadPerms` 角色租户过滤、`/sync-tasks/run` 租户化、新增 `pkg/tenantref` 覆盖 10 处
+  创建接口的跨租户引用注入
+- 前端：登录租户选择弹窗、自助注册表单、顶栏租户徽标、平台管理页、`/tenant` 租户信息页
+- 冒烟新增多租户隔离段（跨租户读取/写入/铸造/停用/登录歧义断言）
+
 ## [0.1.0] - 2026-11-21
 
 ### Added — Phase 0/1 MVP（首个可运行版本）

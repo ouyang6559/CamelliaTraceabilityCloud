@@ -62,7 +62,7 @@ func (api *UsersAPI) listUsers(w http.ResponseWriter, r *http.Request) {
 		var u userDTO
 		var roles []byte
 		err := row.Scan(&u.ID, &u.TenantID, &u.Username, &u.DisplayName, &u.Email, &u.Phone,
-			&u.Locale, &u.Status, &u.LastLoginAt, &u.CreatedAt, &roles)
+			&u.Locale, &u.Status, &u.LastLoginAt, &u.CreatedAt, &u.IsPlatformAdmin, &roles)
 		u.Roles = parseJSONStrings(roles)
 		return u, err
 	})
@@ -207,9 +207,26 @@ func (api *UsersAPI) deleteUser(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// setRoles replaces the user's role links by role code.
+// setRoles replaces the user's role links by role code. The target user MUST
+// belong to the caller's tenant — the historical unscoped DELETE allowed a
+// tenant admin to wipe another tenant's user_roles (fixed, ADR-006).
 func (api *UsersAPI) setRoles(ctx context.Context, tenantID, userID string, roleCodes []string) error {
-	if _, err := api.pool.Exec(ctx, `DELETE FROM user_roles WHERE user_id = $1`, userID); err != nil {
+	var targetTenant string
+	err := api.pool.QueryRow(ctx,
+		`SELECT tenant_id FROM users WHERE id = $1`, userID).Scan(&targetTenant)
+	if err == pgx.ErrNoRows {
+		return apierr.NotFound("user")
+	}
+	if err != nil {
+		return err
+	}
+	if targetTenant != tenantID {
+		return apierr.PermissionDenied("user belongs to another tenant")
+	}
+	if _, err := api.pool.Exec(ctx,
+		`DELETE FROM user_roles ur WHERE ur.user_id = $1
+		 AND EXISTS (SELECT 1 FROM users u WHERE u.id = ur.user_id AND u.tenant_id = $2)`,
+		userID, tenantID); err != nil {
 		return err
 	}
 	for _, code := range roleCodes {

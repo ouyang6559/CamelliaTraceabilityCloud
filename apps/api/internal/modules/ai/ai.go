@@ -233,6 +233,17 @@ func (m *Module) review(w http.ResponseWriter, r *http.Request) {
 		httpx.Respond(w, r, nil, apierr.Invalid("action must be approved or rejected"))
 		return
 	}
+	var jobTenant string
+	err := m.pool.QueryRow(r.Context(),
+		`SELECT tenant_id FROM ai_jobs WHERE id=$1`, jobID).Scan(&jobTenant)
+	if err != nil {
+		httpx.Respond(w, r, nil, apierr.Invalid("job not found"))
+		return
+	}
+	if jobTenant != id.TenantID {
+		httpx.Respond(w, r, nil, apierr.PermissionDenied("job belongs to another tenant"))
+		return
+	}
 	newID := ulidx.New()
 	if _, err := m.pool.Exec(r.Context(), `
 		INSERT INTO ai_reviews (id, tenant_id, job_id, actor_id, action, note)

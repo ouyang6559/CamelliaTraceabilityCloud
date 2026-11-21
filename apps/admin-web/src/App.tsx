@@ -18,6 +18,8 @@ import Users from './pages/Users'
 import Roles from './pages/Roles'
 import AuditLogs from './pages/AuditLogs'
 import { SimpleRoutes } from './pages/SimpleRoutes'
+import PlatformTenants from './pages/PlatformTenants'
+import TenantInfo from './pages/TenantInfo' 
 
 /** Route registry: simple resources are generated inline from CrudPage. */
 export default function App() {
@@ -43,6 +45,8 @@ export default function App() {
         <Route path="/users" element={<Users />} />
         <Route path="/roles" element={<Roles />} />
         <Route path="/audit-logs" element={<AuditLogs />} />
+        <Route path="/tenant" element={<TenantInfo />} />
+        {user.platform_admin && <Route path="/platform/tenants" element={<PlatformTenants />} />}
 
         {/* Simple resources rendered by the shared CrudPage */}
         <Route path="*" element={<SimpleRoutes />} />

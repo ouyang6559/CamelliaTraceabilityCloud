@@ -179,4 +179,70 @@ curl -sf -X POST "$API/ai/chat" -H "$AUTH" -H 'Content-Type: application/json' \
 step "audit: write operations recorded"
 curl -sf "$API/audit-logs?resource_type=farms" -H "$AUTH" | grep -q '"action"' && ok "audit log"
 
+# ---------- SaaS multi-tenant isolation (ADR-006) ----------
+
+step "saas: self-registration provisions tenant B (auto-login)"
+REG=$(curl -sf -X POST "$API/auth/register" -H 'Content-Type: application/json' -d "{
+  \"tenant_name\":\"冒烟租户B\",\"username\":\"smoke-$TAG\",\"password\":\"pass123456\",\"display_name\":\"B租户管理员\"}")
+B_TOKEN=$(echo "$REG" | jqget "['tokens']['access_token']")
+B_AUTH="Authorization: Bearer $B_TOKEN"
+B_CODE=$(echo "$REG" | jqget "['tenant_code']")
+[ -n "$B_TOKEN" ] && ok "tenant B registered (code $B_CODE)"
+
+step "saas: B logs in explicitly with tenant_code"
+B_LOGIN=$(curl -sf -X POST "$API/auth/login" -H 'Content-Type: application/json' -d "{
+  \"username\":\"smoke-$TAG\",\"password\":\"pass123456\",\"tenant_code\":\"$B_CODE\"}")
+B_TOKEN=$(echo "$B_LOGIN" | jqget "['tokens']['access_token']")
+[ -n "$B_TOKEN" ] && ok "explicit tenant_code login"
+
+step "saas: cross-tenant READ is denied (B reads demo farm -> 404)"
+DEMO_FARM=$(curl -sf "$API/farms?page=1&page_size=1" -H "$AUTH" | jqget "['items'][0]['id']")
+XCODE=$(curl -s -o /dev/null -w '%{http_code}' "$API/farms/$DEMO_FARM" -H "$B_AUTH")
+[ "$XCODE" = "404" ] && ok "cross-tenant read 404"
+
+step "saas: cross-tenant role WRITE is denied (B patches demo user -> 403)"
+DEMO_USER=$(curl -sf "$API/users?page=1&page_size=1" -H "$AUTH" | jqget "['items'][0]['id']")
+XCODE=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$API/users/$DEMO_USER" -H "$B_AUTH" \
+  -H 'Content-Type: application/json' -d '{"roles":["operator"]}')
+[ "$XCODE" = "403" ] && ok "cross-tenant user_roles write 403"
+
+step "saas: cross-tenant trace-code minting is denied (B references demo package -> 400)"
+XCODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$API/trace-codes" -H "$B_AUTH" \
+  -H 'Content-Type: application/json' -d "{\"ref_type\":\"package\",\"ref_id\":\"$PKG_ID\",\"code_type\":\"consumer\"}")
+[ "$XCODE" = "400" ] && ok "cross-tenant reference injection 400"
+
+step "saas: platform admin login + tenant list"
+P_LOGIN=$(curl -sf -X POST "$API/auth/login" -H 'Content-Type: application/json' \
+  -d '{"username":"platform","password":"platform123"}')
+P_TOKEN=$(echo "$P_LOGIN" | jqget "['tokens']['access_token']")
+[ -n "$P_TOKEN" ] && ok "platform admin login"
+P_AUTH="Authorization: Bearer $P_TOKEN"
+curl -sf "$API/platform/tenants" -H "$P_AUTH" | grep -q '"code":"demo"' && ok "tenant list contains demo"
+curl -sf "$API/platform/tenants" -H "$P_AUTH" | grep -q "$B_CODE" && ok "tenant list contains registered tenant"
+
+step "saas: platform creates a tenant"
+P_CREATE=$(curl -sf -X POST "$API/platform/tenants" -H "$P_AUTH" -H 'Content-Type: application/json' -d "{
+  \"name\":\"平台创建租户\",\"code\":\"plat-$TAG\",\"admin_username\":\"pa-$TAG\",\"admin_password\":\"pass123456\"}")
+PLAT_CODE=$(echo "$P_CREATE" | jqget "['code']")
+[ -n "$PLAT_CODE" ] && ok "platform-provisioned tenant $PLAT_CODE"
+
+step "saas: suspend tenant B -> its admin login fails -> reactivate"
+B_TENANT_ID=$(curl -sf "$API/platform/tenants?search=$B_CODE" -H "$P_AUTH" | jqget "['items'][0]['id']")
+curl -sf -X PATCH "$API/platform/tenants/$B_TENANT_ID" -H "$P_AUTH" -H 'Content-Type: application/json' \
+  -d '{"status":"suspended"}' > /dev/null
+SUSPENDED=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$API/auth/login" -H 'Content-Type: application/json' \
+  -d "{\"username\":\"smoke-$TAG\",\"password\":\"pass123456\",\"tenant_code\":\"$B_CODE\"}")
+[ "$SUSPENDED" = "401" ] && ok "suspended tenant login rejected"
+curl -sf -X PATCH "$API/platform/tenants/$B_TENANT_ID" -H "$P_AUTH" -H 'Content-Type: application/json' \
+  -d '{"status":"active"}' > /dev/null && ok "tenant re-activated"
+
+step "saas: ambiguous login without tenant_code -> 409 MULTI_TENANT_AMBIGUOUS"
+curl -sf -X POST "$API/users" -H "$AUTH" -H 'Content-Type: application/json' \
+  -d "{\"username\":\"dup-$TAG\",\"password\":\"duppass123\",\"roles\":[\"operator\"]}" > /dev/null
+curl -sf -X POST "$API/users" -H "$B_AUTH" -H 'Content-Type: application/json' \
+  -d "{\"username\":\"dup-$TAG\",\"password\":\"duppass456\",\"roles\":[\"operator\"]}" > /dev/null
+AMB=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$API/auth/login" -H 'Content-Type: application/json' \
+  -d "{\"username\":\"dup-$TAG\",\"password\":\"duppass123\"}")
+[ "$AMB" = "409" ] && ok "ambiguous login returns 409 with tenant options"
+
 printf '\n\033[32m===== SMOKE RESULT: %d steps passed =====\033[0m\n' "$PASS"

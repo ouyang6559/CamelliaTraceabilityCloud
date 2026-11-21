@@ -34,6 +34,7 @@ func (j *JWT) Issue(claims ctxid.Claims) (token string, expiresAt time.Time, err
 		"name":     claims.DisplayName,
 		"roles":    claims.Roles,
 		"perms":    claims.Perms,
+		"pa":       claims.PlatformAdmin,
 		"exp":      expiresAt.Unix(),
 		"iat":      time.Now().Unix(),
 		"iss":      "ctc-api",
@@ -65,12 +66,13 @@ func (j *JWT) Parse(token string) (ctxid.Claims, error) {
 	name, _ := mc["name"].(string)
 	roles := stringList(mc["roles"])
 	perms := stringList(mc["perms"])
+	pa, _ := mc["pa"].(bool)
 	if sub == "" || tid == "" {
 		return ctxid.Claims{}, apierr.Unauthenticated("token missing subject or tenant")
 	}
 	return ctxid.Claims{
 		UserID: sub, TenantID: tid, Username: username, DisplayName: name,
-		Roles: roles, Perms: perms,
+		Roles: roles, Perms: perms, PlatformAdmin: pa,
 	}, nil
 }
 
@@ -110,7 +112,7 @@ func Auth(j *JWT) func(http.Handler) http.Handler {
 			identity := ctxid.Identity{
 				UserID: claims.UserID, TenantID: claims.TenantID,
 				Username: claims.Username, DisplayName: claims.DisplayName,
-				Roles: claims.Roles, Perms: claims.Perms,
+				Roles: claims.Roles, Perms: claims.Perms, PlatformAdmin: claims.PlatformAdmin,
 			}
 			next.ServeHTTP(w, r.WithContext(ctxid.WithIdentity(r.Context(), identity)))
 		})

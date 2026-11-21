@@ -22,6 +22,7 @@ export default function AdminLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const user = useAuth((s) => s.user)
+  const tenant = useAuth((s) => s.tenant)
   const logout = useAuth((s) => s.logout)
   const locale = useAuth((s) => s.locale)
   const setLocale = useAuth((s) => s.setLocale)
@@ -96,6 +97,9 @@ export default function AdminLayout() {
       ],
     },
     { key: '/ai', icon: <RobotOutlined />, label: t('nav.ai') },
+    ...(user?.platform_admin
+      ? [{ key: '/platform/tenants', icon: <CloudServerOutlined />, label: t('nav.platformAdmin') }]
+      : []),
     {
       key: 'system',
       icon: <TeamOutlined />,
@@ -184,6 +188,16 @@ export default function AdminLayout() {
               icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
               onClick={() => setCollapsed(!collapsed)}
             />
+            {tenant && (
+              <Typography.Text
+                style={{
+                  background: '#e8f5e9', color: '#2e7d32', borderRadius: 10,
+                  padding: '2px 10px', fontSize: 12, fontWeight: 600,
+                }}
+              >
+                {tenant.name || tenant.code}
+              </Typography.Text>
+            )}
             <Typography.Text type="secondary">{t('app.subtitle')}</Typography.Text>
           </Space>
           <Dropdown menu={userMenu} placement="bottomRight">

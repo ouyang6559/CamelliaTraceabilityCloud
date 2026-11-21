@@ -110,10 +110,19 @@ func (m *Module) download(w http.ResponseWriter, r *http.Request) {
 // trace-web: only files linked to evidence records are served.
 func (m *Module) ServeEvidenceFile(w http.ResponseWriter, r *http.Request, fileID string) {
 	var objectKey, filename, mime string
+	// ADR-006 hardening: the evidence must be bound to an ACTIVE public trace
+	// code's chain node (ref_type+ref_id), otherwise the file is not publicly
+	// readable even though a valid-looking evidence row exists.
 	err := m.pool.QueryRow(r.Context(), `
 		SELECT f.object_key, f.filename, f.mime FROM files f
 		JOIN evidence e ON e.file_id = f.id
-		WHERE f.id = $1 LIMIT 1`, fileID).Scan(&objectKey, &filename, &mime)
+		WHERE f.id = $1
+		  AND EXISTS (
+			SELECT 1 FROM trace_codes tc
+			WHERE tc.status = 'active'
+			  AND tc.ref_type = e.ref_type AND tc.ref_id = e.ref_id
+		  )
+		LIMIT 1`, fileID).Scan(&objectKey, &filename, &mime)
 	if err == pgx.ErrNoRows {
 		httpx.Respond(w, r, nil, apierr.NotFound("file"))
 		return

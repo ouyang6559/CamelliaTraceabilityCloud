@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -83,6 +84,18 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 	jwt := middleware.NewJWT(cfg.JWTSecret, cfg.AccessTokenTTL)
 	pub := platform.EventsPublisher(natsConn, log)
 
+	// SaaS multi-tenancy bootstrap (docs/adr/adr-006): permission catalog +
+	// platform administrator account.
+	if err := identity.EnsurePermissionCatalog(ctx, pool); err != nil {
+		return nil, fmt.Errorf("ensure permission catalog: %w", err)
+	}
+	if err := identity.EnsurePlatformAdmin(ctx, pool, cfg, log); err != nil {
+		return nil, fmt.Errorf("ensure platform admin: %w", err)
+	}
+	if cfg.PlatformAdminPassword == "platform123" {
+		log.Warn("CTC_PLATFORM_ADMIN_PASSWORD not set; using development default — do not use in production")
+	}
+
 	app := &App{
 		Cfg: cfg, Log: log, Pool: pool, Redis: rdb, NATSConn: natsConn, Storage: storage,
 	}
@@ -138,8 +151,11 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 		traceAPI.MountPublicMedia(api, filesModule.ServeEvidenceFile)
 		devModule.MountDeviceGateway(api) // device-token authenticated (no user JWT)
 
-		// Identity mounts both public /auth and protected /users, /roles, /tenants.
-		identity.NewModule(pool, jwt).Mount(api)
+		// Identity mounts public /auth (incl. self-registration) + platform
+		// console routes and protected /users, /roles, /tenants.
+		identityModule := identity.NewModule(pool, jwt)
+		identityModule.SetContext(cfg, log)
+		identityModule.Mount(api)
 
 		// Private API: JWT + audit middleware for everything below.
 		api.Group(func(priv chi.Router) {

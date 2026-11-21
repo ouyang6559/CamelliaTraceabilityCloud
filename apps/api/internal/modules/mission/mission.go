@@ -22,6 +22,7 @@ import (
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/events"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/geo"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/httpx"
+	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/tenantref"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/ulidx"
 )
 
@@ -308,6 +309,11 @@ func (m *Module) createMission(w http.ResponseWriter, r *http.Request) {
 			httpx.Respond(w, r, nil, apierr.Invalid("waypoint out of WGS84 bounds"))
 			return
 		}
+	}
+	// The mission device must belong to the caller's tenant (ADR-006).
+	if err := tenantref.MustExist(r.Context(), m.pool, id.TenantID, "device", req.DeviceID); err != nil {
+		httpx.Respond(w, r, nil, err)
+		return
 	}
 
 	newID := ulidx.New()

@@ -17,7 +17,7 @@ import (
 type loginRequest struct {
 	Username   string `json:"username"`
 	Password   string `json:"password"`
-	TenantCode string `json:"tenant_code"` // optional; defaults to the single matching tenant
+	TenantCode string `json:"tenant_code"` // optional; required when the username exists in several tenants
 }
 
 type tokenPair struct {
@@ -43,7 +43,8 @@ func (m *Module) login(w http.ResponseWriter, r *http.Request) {
 	// Resolve tenant: explicit code first, otherwise the unique tenant of that username.
 	var tenantID string
 	if req.TenantCode != "" {
-		err := m.pool.QueryRow(ctx, `SELECT id FROM tenants WHERE code = $1`, req.TenantCode).Scan(&tenantID)
+		err := m.pool.QueryRow(ctx,
+			`SELECT id FROM tenants WHERE code = $1 AND status = 'active'`, req.TenantCode).Scan(&tenantID)
 		if err == pgx.ErrNoRows {
 			httpx.Respond(w, r, nil, apierr.Unauthenticated("invalid credentials"))
 			return
@@ -57,12 +58,7 @@ func (m *Module) login(w http.ResponseWriter, r *http.Request) {
 			httpx.Respond(w, r, nil, err)
 			return
 		}
-		pair, u, err := m.issueTokens(ctx, r, tenantID, userID)
-		if err != nil {
-			httpx.Respond(w, r, nil, err)
-			return
-		}
-		httpx.Respond(w, r, map[string]any{"user": u, "tokens": pair}, nil)
+		m.respondLogin(ctx, w, r, tenantID, userID)
 		return
 	}
 
@@ -85,18 +81,46 @@ func (m *Module) login(w http.ResponseWriter, r *http.Request) {
 	}
 	rows.Close()
 
+	// Verify the password first, then disambiguate — the tenant list is only
+	// revealed to callers holding valid credentials (no user enumeration).
+	var matched []candidate
 	for _, c := range cands {
 		if passhash.Verify(c.hash, req.Password) {
-			pair, u, err := m.issueTokens(ctx, r, c.tenantID, c.userID)
-			if err != nil {
-				httpx.Respond(w, r, nil, err)
-				return
-			}
-			httpx.Respond(w, r, map[string]any{"user": u, "tokens": pair}, nil)
-			return
+			matched = append(matched, c)
 		}
 	}
-	httpx.Respond(w, r, nil, apierr.Unauthenticated("invalid credentials"))
+	switch {
+	case len(matched) == 0:
+		httpx.Respond(w, r, nil, apierr.Unauthenticated("invalid credentials"))
+	case len(matched) == 1:
+		m.respondLogin(ctx, w, r, matched[0].tenantID, matched[0].userID)
+	default:
+		// Same username exists in several tenants: ask the caller to pick one
+		// (docs/adr/adr-006). Tenants list carries only public info.
+		tenants := []map[string]any{}
+		for _, c := range matched {
+			var code, name string
+			if err := m.pool.QueryRow(ctx,
+				`SELECT code, name FROM tenants WHERE id = $1`, c.tenantID).Scan(&code, &name); err == nil {
+				tenants = append(tenants, map[string]any{"code": code, "name": name})
+			}
+		}
+		httpx.WriteJSON(w, http.StatusConflict, map[string]any{
+			"code":    "MULTI_TENANT_AMBIGUOUS",
+			"message": "this username exists in multiple tenants; pass tenant_code",
+			"tenants": tenants,
+		})
+	}
+}
+
+// respondLogin issues the token pair and writes the login response.
+func (m *Module) respondLogin(ctx context.Context, w http.ResponseWriter, r *http.Request, tenantID, userID string) {
+	pair, u, err := m.issueTokens(ctx, r, tenantID, userID)
+	if err != nil {
+		httpx.Respond(w, r, nil, err)
+		return
+	}
+	httpx.Respond(w, r, map[string]any{"user": u, "tokens": pair}, nil)
 }
 
 func (m *Module) authenticate(ctx context.Context, tenantID, username, password string) (string, error) {
@@ -122,13 +146,18 @@ func (m *Module) issueTokens(ctx context.Context, r *http.Request, tenantID, use
 	if err != nil {
 		return tokenPair{}, userDTO{}, err
 	}
-	roles, perms, err := m.loadPerms(ctx, userID)
+	roles, perms, err := m.loadPerms(ctx, userID, tenantID)
 	if err != nil {
 		return tokenPair{}, userDTO{}, err
 	}
+	pa := u.IsPlatformAdmin
+	if pa {
+		// Platform administrators hold full authority across tenants (ADR-006).
+		perms = []string{"*:*"}
+	}
 	access, expiresAt, err := m.jwt.Issue(ctxid.Claims{
 		UserID: userID, TenantID: tenantID, Username: u.Username,
-		DisplayName: u.DisplayName, Roles: roles, Perms: perms,
+		DisplayName: u.DisplayName, Roles: roles, Perms: perms, PlatformAdmin: pa,
 	})
 	if err != nil {
 		return tokenPair{}, userDTO{}, err
@@ -172,8 +201,9 @@ func (m *Module) refresh(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	var sessID, tenantID, userID string
 	err := m.pool.QueryRow(ctx,
-		`SELECT id, tenant_id, user_id FROM sessions
-		 WHERE refresh_hash = $1 AND revoked = false AND expires_at > now()`,
+		`SELECT s.id, s.tenant_id, s.user_id FROM sessions s
+		 JOIN tenants t ON t.id = s.tenant_id AND t.status = 'active'
+		 WHERE s.refresh_hash = $1 AND s.revoked = false AND s.expires_at > now()`,
 		hashToken(req.RefreshToken)).Scan(&sessID, &tenantID, &userID)
 	if err == pgx.ErrNoRows {
 		httpx.Respond(w, r, nil, apierr.Unauthenticated("invalid refresh token"))
@@ -218,12 +248,15 @@ func (m *Module) me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var tenant struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-		Code string `json:"code"`
+		ID     string `json:"id"`
+		Name   string `json:"name"`
+		Code   string `json:"code"`
+		Status string `json:"status"`
 	}
 	_ = m.pool.QueryRow(r.Context(),
-		`SELECT id, name, code FROM tenants WHERE id = $1`, id.TenantID).
-		Scan(&tenant.ID, &tenant.Name, &tenant.Code)
-	httpx.Respond(w, r, map[string]any{"user": u, "tenant": tenant, "permissions": id.Perms}, nil)
+		`SELECT id, name, code, status FROM tenants WHERE id = $1`, id.TenantID).
+		Scan(&tenant.ID, &tenant.Name, &tenant.Code, &tenant.Status)
+	httpx.Respond(w, r, map[string]any{
+		"user": u, "tenant": tenant, "permissions": id.Perms, "platform_admin": id.PlatformAdmin,
+	}, nil)
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/apierr"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/ctxid"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/httpx"
+	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/tenantref"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/ulidx"
 )
 
@@ -43,6 +44,24 @@ func (api *API) createCode(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.CodeType == "" {
 		req.CodeType = "package"
+	}
+	// Ownership check: a tenant must not mint codes for another tenant's
+	// objects (cross-tenant reference injection, ADR-006 hardening).
+	if err := tenantref.MustExist(r.Context(), api.svc.pool, id.TenantID, req.RefType, req.RefID); err != nil {
+		httpx.Respond(w, r, nil, err)
+		return
+	}
+	if req.ProductBatchID != "" {
+		if err := tenantref.MustExist(r.Context(), api.svc.pool, id.TenantID, "product_batch", req.ProductBatchID); err != nil {
+			httpx.Respond(w, r, nil, err)
+			return
+		}
+	}
+	if req.PackageID != "" {
+		if err := tenantref.MustExist(r.Context(), api.svc.pool, id.TenantID, "package", req.PackageID); err != nil {
+			httpx.Respond(w, r, nil, err)
+			return
+		}
 	}
 	n := req.Quantity
 	if n < 1 {

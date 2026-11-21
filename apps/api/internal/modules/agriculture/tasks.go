@@ -14,6 +14,7 @@ import (
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/apierr"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/ctxid"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/httpx"
+	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/tenantref"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/ulidx"
 )
 
@@ -105,6 +106,16 @@ func (m *Module) createTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Type == "" {
 		req.Type = "other"
+	}
+	// Reference ownership (ADR-006 hardening).
+	if err := tenantref.MustExistAll(r.Context(), m.pool, id.TenantID,
+		[2]string{"farm", req.FarmID},
+		[2]string{"plot", req.PlotID},
+		[2]string{"crop_batch", req.CropBatchID},
+		[2]string{"user", req.AssigneeID},
+	); err != nil {
+		httpx.Respond(w, r, nil, err)
+		return
 	}
 	newID := ulidx.New()
 	meta, _ := json.Marshal(req.Metadata)
@@ -375,6 +386,10 @@ func (m *Module) createTaskRecord(w http.ResponseWriter, r *http.Request) {
 		httpx.Respond(w, r, nil, err)
 		return
 	}
+	if err := tenantref.MustExist(r.Context(), m.pool, id.TenantID, "task", taskID); err != nil {
+		httpx.Respond(w, r, nil, err)
+		return
+	}
 	var loc any
 	if req.Latitude != 0 || req.Longitude != 0 {
 		loc = "POINT(" + strconv.FormatFloat(req.Longitude, 'f', 6, 64) + " " +
@@ -452,6 +467,10 @@ func (m *Module) createInputUsage(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.TaskID == "" || req.InputBatchID == "" || req.Quantity <= 0 {
 		httpx.Respond(w, r, nil, apierr.Invalid("task_id, input_batch_id and positive quantity are required"))
+		return
+	}
+	if err := tenantref.MustExist(r.Context(), m.pool, id.TenantID, "task", req.TaskID); err != nil {
+		httpx.Respond(w, r, nil, err)
 		return
 	}
 	newID := ulidx.New()

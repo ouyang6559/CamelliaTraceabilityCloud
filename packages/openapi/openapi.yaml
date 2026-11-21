@@ -54,6 +54,13 @@ paths:
         "200":
           description: user + token pair (access JWT 30min / refresh 7d)
         "401": { $ref: "#/components/responses/Error" }
+  /auth/register:
+    post:
+      tags: [auth]
+      summary: SaaS self-registration — provision a tenant + admin user, returns token pair (toggle CTC_REGISTRATION_ENABLED)
+      responses:
+        "201": { description: tenant created, auto signed-in }
+        "403": { $ref: "#/components/responses/Error" }
   /auth/refresh:
     post: { tags: [auth], summary: Rotate refresh token, responses: { "200": { description: new pair } } }
   /auth/me:
@@ -66,6 +73,13 @@ paths:
     get: { tags: [identity], summary: Permission catalog, responses: { "200": { description: OK } } }
   /tenants/current:
     get: { tags: [identity], summary: Own tenant, responses: { "200": { description: OK } } }
+  /platform/tenants:
+    get: { tags: [identity], summary: "Platform admin: list tenants (search/status + usage counts)", responses: { "200": { description: OK } } }
+    post: { tags: [identity], summary: "Platform admin: provision a tenant + admin account", responses: { "201": { description: Created } } }
+  /platform/tenants/{id}:
+    patch: { tags: [identity], summary: "Platform admin: rename / suspend / activate", responses: { "204": { description: No Content } } }
+  /platform/tenants/{id}/reset-admin-password:
+    post: { tags: [identity], summary: "Platform admin: reset the oldest tenant_admin password + revoke sessions", responses: { "200": { description: reset } } }
 
   /farms: { $ref: "#/components/pathBlocks/standardCollection" }
   /plots: { $ref: "#/components/pathBlocks/standardCollection" }

@@ -8,12 +8,18 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/config"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/middleware"
+	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/apierr"
+	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/ctxid"
+	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/httpx"
 )
 
 // Permission is one entry of the platform permission catalog.
@@ -118,41 +124,59 @@ func allPermCodes() []string {
 type Module struct {
 	pool *pgxpool.Pool
 	jwt  *middleware.JWT
+	cfg  *config.Config
+	log  *slog.Logger
 }
 
 func NewModule(pool *pgxpool.Pool, jwt *middleware.JWT) *Module {
 	return &Module{pool: pool, jwt: jwt}
 }
 
+// SetContext wires config/logging needed by the SaaS endpoints (app assembly).
+func (m *Module) SetContext(cfg *config.Config, log *slog.Logger) { m.cfg = cfg; m.log = log }
+
+// RequirePlatformAdmin grants access only to platform operators (ADR-006).
+func RequirePlatformAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id, ok := ctxid.From(r.Context())
+		if !ok || !id.PlatformAdmin {
+			httpx.Respond(w, r, nil, apierr.PermissionDenied("platform administrator required"))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // ---------- shared helpers ----------
 
 type userDTO struct {
-	ID          string     `json:"id"`
-	TenantID    string     `json:"tenant_id"`
-	Username    string     `json:"username"`
-	DisplayName string     `json:"display_name"`
-	Email       string     `json:"email"`
-	Phone       string     `json:"phone"`
-	Locale      string     `json:"locale"`
-	Status      string     `json:"status"`
-	Roles       []string   `json:"roles"`
-	LastLoginAt *time.Time `json:"last_login_at"`
-	CreatedAt   time.Time  `json:"created_at"`
+	ID              string     `json:"id"`
+	TenantID        string     `json:"tenant_id"`
+	Username        string     `json:"username"`
+	DisplayName     string     `json:"display_name"`
+	Email           string     `json:"email"`
+	Phone           string     `json:"phone"`
+	Locale          string     `json:"locale"`
+	Status          string     `json:"status"`
+	Roles           []string   `json:"roles"`
+	IsPlatformAdmin bool       `json:"platform_admin"`
+	LastLoginAt     *time.Time `json:"last_login_at"`
+	CreatedAt       time.Time  `json:"created_at"`
 }
 
 const userSelect = `SELECT u.id, u.tenant_id, u.username, u.display_name, u.email, u.phone,
-	u.locale, u.status, u.last_login_at, u.created_at,
+	u.locale, u.status, u.last_login_at, u.created_at, u.is_platform_admin,
 	COALESCE(json_agg(r.code) FILTER (WHERE r.code IS NOT NULL), '[]') AS roles
 	FROM users u
 	LEFT JOIN user_roles ur ON ur.user_id = u.id
-	LEFT JOIN roles r ON r.id = ur.role_id`
+	LEFT JOIN roles r ON r.id = ur.role_id AND r.tenant_id = u.tenant_id`
 
 func (m *Module) scanUser(ctx context.Context, userID, tenantID string) (userDTO, error) {
 	var u userDTO
 	var roles []byte
 	err := m.pool.QueryRow(ctx, userSelect+" WHERE u.tenant_id=$1 AND u.id=$2 GROUP BY u.id",
 		tenantID, userID).Scan(&u.ID, &u.TenantID, &u.Username, &u.DisplayName, &u.Email, &u.Phone,
-		&u.Locale, &u.Status, &u.LastLoginAt, &u.CreatedAt, &roles)
+		&u.Locale, &u.Status, &u.LastLoginAt, &u.CreatedAt, &u.IsPlatformAdmin, &roles)
 	if err != nil {
 		return u, err
 	}
@@ -170,14 +194,16 @@ func parseJSONStrings(raw []byte) []string {
 }
 
 // loadPerms returns the union of role codes and permission codes for a user.
-func (m *Module) loadPerms(ctx context.Context, userID string) (roles, perms []string, err error) {
+// Roles are restricted to the user's own tenant — cross-tenant role links
+// created through any path must never contribute permissions (ADR-006).
+func (m *Module) loadPerms(ctx context.Context, userID, tenantID string) (roles, perms []string, err error) {
 	rows, err := m.pool.Query(ctx, `
 		SELECT DISTINCT r.code, p.code
 		FROM user_roles ur
-		JOIN roles r ON r.id = ur.role_id
+		JOIN roles r ON r.id = ur.role_id AND r.tenant_id = $2
 		JOIN role_permissions rp ON rp.role_id = r.id
 		JOIN permissions p ON p.id = rp.permission_id
-		WHERE ur.user_id = $1`, userID)
+		WHERE ur.user_id = $1`, userID, tenantID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -219,17 +245,28 @@ func randomToken() string {
 	return hex.EncodeToString(b)
 }
 
-// Mount registers /auth, /users, /roles, /tenants.
+// Mount registers /auth, /users, /roles, /tenants and the SaaS endpoints.
 func (m *Module) Mount(r chi.Router) {
 	users := NewUsersAPI(m.pool)
 	roles := NewRolesAPI(m.pool)
 	tenants := NewTenantsAPI(m.pool)
+	saas := NewSaaSAPI(m.pool, m.cfg, m.log, m)
 
 	r.Route("/auth", func(rr chi.Router) {
 		rr.Post("/login", m.login)
+		rr.Post("/register", saas.register) // public self-signup (ADR-006)
 		rr.Post("/refresh", m.refresh)
 		rr.With(middleware.Auth(m.jwt)).Post("/logout", m.logout)
 		rr.With(middleware.Auth(m.jwt)).Get("/me", m.me)
+	})
+
+	// Platform administration (docs/adr/adr-006): platform admins only.
+	r.Route("/platform", func(rr chi.Router) {
+		rr.Use(middleware.Auth(m.jwt), RequirePlatformAdmin)
+		rr.Get("/tenants", saas.listTenants)
+		rr.Post("/tenants", saas.createTenant)
+		rr.Patch("/tenants/{id}", saas.patchTenant)
+		rr.Post("/tenants/{id}/reset-admin-password", saas.resetAdminPassword)
 	})
 	r.Route("/users", func(rr chi.Router) {
 		rr.Use(middleware.Auth(m.jwt))

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -22,6 +23,7 @@ import (
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/ctxid"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/events"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/httpx"
+	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/tenantref"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/ulidx"
 )
 
@@ -54,21 +56,29 @@ func (m *Module) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				m.RunOnce(ctx)
+				m.RunOnce(ctx, "")
 			}
 		}
 	}()
 }
 
-// RunOnce processes due sync tasks (PENDING / RETRYING / FAILED with backoff elapsed).
-func (m *Module) RunOnce(ctx context.Context) {
+// RunOnce processes due sync tasks (PENDING / RETRYING / FAILED with backoff
+// elapsed). tenantID filters to one tenant; empty string = all tenants (used by
+// the background worker — user-triggered runs are tenant-scoped, ADR-006).
+func (m *Module) RunOnce(ctx context.Context, tenantID string) {
+	args := []any{StatusPending, StatusRetrying, StatusFailed}
+	conds := "st.status IN ($1,$2,$3) AND st.scheduled_at <= now()"
+	if tenantID != "" {
+		args = append(args, tenantID)
+		conds += " AND st.tenant_id = $" + strconv.Itoa(len(args))
+	}
 	rows, err := m.pool.Query(ctx, `
 		SELECT st.id, st.tenant_id, st.ref_type, st.ref_id, st.action, st.idempotency_key,
 			st.payload, st.attempts, st.max_attempts, ep.provider_type
 		FROM sync_tasks st
 		JOIN external_platforms ep ON ep.id = st.platform_id
-		WHERE st.status IN ($1,$2,$3) AND st.scheduled_at <= now()
-		LIMIT 20`, StatusPending, StatusRetrying, StatusFailed)
+		WHERE `+conds+`
+		LIMIT 20`, args...)
 	if err != nil {
 		return
 	}
@@ -332,6 +342,10 @@ func (m *Module) createTask(w http.ResponseWriter, r *http.Request) {
 		httpx.Respond(w, r, nil, apierr.Invalid("platform_id, ref_type and ref_id are required"))
 		return
 	}
+	if err := tenantref.MustExist(r.Context(), m.pool, id.TenantID, "platform", req.PlatformID); err != nil {
+		httpx.Respond(w, r, nil, err)
+		return
+	}
 	if req.Action == "" {
 		req.Action = "push"
 	}
@@ -430,6 +444,13 @@ func (m *Module) retryTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) runNow(w http.ResponseWriter, r *http.Request) {
-	m.RunOnce(r.Context())
+	id, err := ctxid.Must(r.Context())
+	if err != nil {
+		httpx.Respond(w, r, nil, err)
+		return
+	}
+	// Tenant-scoped run: a tenant user may only trigger their own tasks
+	// (ADR-006 hardening); the background worker handles all tenants.
+	m.RunOnce(r.Context(), id.TenantID)
 	httpx.Respond(w, r, map[string]any{"ok": true}, nil)
 }

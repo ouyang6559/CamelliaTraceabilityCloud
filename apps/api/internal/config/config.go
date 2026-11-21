@@ -48,39 +48,46 @@ type Config struct {
 	DJIAppSecret string
 	DJIWorkspace string
 
+	// SaaS multi-tenancy (docs/adr/adr-006): public self-registration toggle and
+	// the platform administrator bootstrap password.
+	RegistrationEnabled   bool
+	PlatformAdminPassword string
+
 	LogLevel string
 }
 
 func Load() *Config {
 	c := &Config{
-		Mode:               getenv("CTC_MODE", "run"),
-		HTTPAddr:           getenv("CTC_HTTP_ADDR", ":8080"),
-		DatabaseURL:        getenv("CTC_DATABASE_URL", "postgres://ctc:ctc@localhost:5432/ctc?sslmode=disable"),
-		RedisURL:           getenv("CTC_REDIS_URL", "redis://localhost:6379/0"),
-		NATSURL:            getenv("CTC_NATS_URL", "nats://localhost:4222"),
-		MQTTURL:            getenv("CTC_MQTT_URL", "tcp://localhost:1883"),
-		JWTSecret:          getenv("CTC_JWT_SECRET", ""),
-		AccessTokenTTL:     getDuration("CTC_ACCESS_TTL", 30*time.Minute),
-		RefreshTokenTTL:    getDuration("CTC_REFRESH_TTL", 7*24*time.Hour),
-		SeedAdminPassword:  getenv("CTC_SEED_ADMIN_PASSWORD", "admin123"),
-		TraceCodeURLPrefix: getenv("CTC_TRACE_URL_PREFIX", "http://localhost:5174/t"),
-		StorageMode:        getenv("CTC_STORAGE_MODE", "local"),
-		StorageDir:         getenv("CTC_STORAGE_DIR", "./data/files"),
-		S3Endpoint:         getenv("CTC_S3_ENDPOINT", "localhost:9000"),
-		S3Bucket:           getenv("CTC_S3_BUCKET", "ctc-files"),
-		S3AccessKey:        getenv("CTC_S3_ACCESS_KEY", "ctc"),
-		S3SecretKey:        getenv("CTC_S3_SECRET_KEY", "ctc-secret"),
-		S3UseSSL:           getBool("CTC_S3_USE_SSL", false),
-		SyncInterval:       getDuration("CTC_SYNC_INTERVAL", 15*time.Second),
-		AIProvider:         getenv("CTC_AI_PROVIDER", "mock"),
-		AIBaseURL:          getenv("CTC_AI_BASE_URL", ""),
-		AIAPIKey:           getenv("CTC_AI_API_KEY", ""),
-		AIModel:            getenv("CTC_AI_MODEL", "gpt-4o-mini"),
-		DJIAppID:           getenv("CTC_DJI_APP_ID", ""),
-		DJIAppKey:          getenv("CTC_DJI_APP_KEY", ""),
-		DJIAppSecret:       getenv("CTC_DJI_APP_SECRET", ""),
-		DJIWorkspace:       getenv("CTC_DJI_WORKSPACE", ""),
-		LogLevel:           getenv("CTC_LOG_LEVEL", "info"),
+		Mode:                  getenv("CTC_MODE", "run"),
+		HTTPAddr:              getenv("CTC_HTTP_ADDR", ":8080"),
+		DatabaseURL:           getenv("CTC_DATABASE_URL", "postgres://ctc:ctc@localhost:5432/ctc?sslmode=disable"),
+		RedisURL:              getenv("CTC_REDIS_URL", "redis://localhost:6379/0"),
+		NATSURL:               getenv("CTC_NATS_URL", "nats://localhost:4222"),
+		MQTTURL:               getenv("CTC_MQTT_URL", "tcp://localhost:1883"),
+		JWTSecret:             getenv("CTC_JWT_SECRET", ""),
+		AccessTokenTTL:        getDuration("CTC_ACCESS_TTL", 30*time.Minute),
+		RefreshTokenTTL:       getDuration("CTC_REFRESH_TTL", 7*24*time.Hour),
+		SeedAdminPassword:     getenv("CTC_SEED_ADMIN_PASSWORD", "admin123"),
+		TraceCodeURLPrefix:    getenv("CTC_TRACE_URL_PREFIX", "http://localhost:5174/t"),
+		StorageMode:           getenv("CTC_STORAGE_MODE", "local"),
+		StorageDir:            getenv("CTC_STORAGE_DIR", "./data/files"),
+		S3Endpoint:            getenv("CTC_S3_ENDPOINT", "localhost:9000"),
+		S3Bucket:              getenv("CTC_S3_BUCKET", "ctc-files"),
+		S3AccessKey:           getenv("CTC_S3_ACCESS_KEY", "ctc"),
+		S3SecretKey:           getenv("CTC_S3_SECRET_KEY", "ctc-secret"),
+		S3UseSSL:              getBool("CTC_S3_USE_SSL", false),
+		SyncInterval:          getDuration("CTC_SYNC_INTERVAL", 15*time.Second),
+		AIProvider:            getenv("CTC_AI_PROVIDER", "mock"),
+		AIBaseURL:             getenv("CTC_AI_BASE_URL", ""),
+		AIAPIKey:              getenv("CTC_AI_API_KEY", ""),
+		AIModel:               getenv("CTC_AI_MODEL", "gpt-4o-mini"),
+		DJIAppID:              getenv("CTC_DJI_APP_ID", ""),
+		DJIAppKey:             getenv("CTC_DJI_APP_KEY", ""),
+		DJIAppSecret:          getenv("CTC_DJI_APP_SECRET", ""),
+		DJIWorkspace:          getenv("CTC_DJI_WORKSPACE", ""),
+		RegistrationEnabled:   getBool("CTC_REGISTRATION_ENABLED", true),
+		PlatformAdminPassword: getenv("CTC_PLATFORM_ADMIN_PASSWORD", "platform123"),
+		LogLevel:              getenv("CTC_LOG_LEVEL", "info"),
 	}
 	if c.JWTSecret == "" {
 		// Development default; production must set CTC_JWT_SECRET (logged once at startup).

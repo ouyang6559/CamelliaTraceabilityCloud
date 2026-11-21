@@ -13,6 +13,7 @@ import (
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/ctxid"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/geo"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/httpx"
+	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/tenantref"
 )
 
 // API exposes the trace module REST endpoints.
@@ -190,6 +191,19 @@ func (api *API) createEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Location != nil {
 		in.Location = &geo.Point{Lat: req.Location.Lat, Lng: req.Location.Lng}
+	}
+	// Reference ownership: farm/plot/batch/task/device/mission must belong to
+	// the caller's tenant (ADR-006 hardening).
+	if err := tenantref.MustExistAll(r.Context(), api.svc.pool, id.TenantID,
+		[2]string{"farm", req.FarmID},
+		[2]string{"plot", req.PlotID},
+		[2]string{"crop_batch", req.CropBatchID},
+		[2]string{"task", req.TaskID},
+		[2]string{"device", req.DeviceID},
+		[2]string{"mission", req.MissionID},
+	); err != nil {
+		httpx.Respond(w, r, nil, err)
+		return
 	}
 	created, err := api.svc.Append(r.Context(), id.TenantID, in)
 	if err != nil {

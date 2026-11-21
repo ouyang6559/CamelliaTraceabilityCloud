@@ -16,22 +16,24 @@ const (
 
 // Claims is the JWT payload.
 type Claims struct {
-	UserID      string   `json:"sub"`
-	TenantID    string   `json:"tid"`
-	Username    string   `json:"username"`
-	DisplayName string   `json:"name"`
-	Roles       []string `json:"roles"`
-	Perms       []string `json:"perms"` // e.g. "farm:read", "*:*"
+	UserID        string   `json:"sub"`
+	TenantID      string   `json:"tid"`
+	Username      string   `json:"username"`
+	DisplayName   string   `json:"name"`
+	Roles         []string `json:"roles"`
+	Perms         []string `json:"perms"` // e.g. "farm:read", "*:*"
+	PlatformAdmin bool     `json:"pa"`    // platform operator (docs/adr/adr-006)
 }
 
 // Identity is the resolved user attached by the auth middleware.
 type Identity struct {
-	UserID      string
-	TenantID    string
-	Username    string
-	DisplayName string
-	Roles       []string
-	Perms       []string
+	UserID        string
+	TenantID      string
+	Username      string
+	DisplayName   string
+	Roles         []string
+	Perms         []string
+	PlatformAdmin bool
 }
 
 // WithIdentity stores the identity in the context.
@@ -56,7 +58,11 @@ func Must(ctx context.Context) (Identity, error) {
 }
 
 // HasPerm checks resource:action against the identity's permission set (supports "*:*", "res:*").
+// Platform administrators hold full authority across tenants (docs/adr/adr-006).
 func (i Identity) HasPerm(resource, action string) bool {
+	if i.PlatformAdmin {
+		return true
+	}
 	want := resource + ":" + action
 	for _, p := range i.Perms {
 		if p == want || p == resource+":*" || p == "*:"+action || p == "*:*" {

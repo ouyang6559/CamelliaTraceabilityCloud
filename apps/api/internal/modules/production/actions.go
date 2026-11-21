@@ -12,6 +12,7 @@ import (
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/apierr"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/ctxid"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/httpx"
+	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/tenantref"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/ulidx"
 )
 
@@ -206,6 +207,10 @@ func (m *Module) createMovement(w http.ResponseWriter, r *http.Request) {
 	case "in", "out", "adjust":
 	default:
 		httpx.Respond(w, r, nil, apierr.Invalid("direction must be in|out|adjust"))
+		return
+	}
+	if err := tenantref.MustExist(r.Context(), m.pool, id.TenantID, "warehouse", req.WarehouseID); err != nil {
+		httpx.Respond(w, r, nil, err)
 		return
 	}
 	ctx := r.Context()

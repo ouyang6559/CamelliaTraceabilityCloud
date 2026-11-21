@@ -21,6 +21,7 @@ import (
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/ctxid"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/events"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/httpx"
+	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/tenantref"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/ulidx"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/platform"
 )
@@ -103,6 +104,18 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 		req.EvidenceType = "photo"
 	}
 
+	// trace_event ownership (ADR-006 hardening).
+	if req.TraceEventID != "" {
+		ok, err := tenantref.Exists(r.Context(), m.pool, id.TenantID, "trace_event", req.TraceEventID)
+		if err != nil {
+			httpx.Respond(w, r, nil, err)
+			return
+		}
+		if !ok {
+			httpx.Respond(w, r, nil, apierr.Invalid("trace_event does not exist in your tenant"))
+			return
+		}
+	}
 	var fileID any
 	var sha string
 	var filename, mime string

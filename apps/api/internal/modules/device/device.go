@@ -22,6 +22,7 @@ import (
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/ctxid"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/events"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/httpx"
+	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/tenantref"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/ulidx"
 )
 
@@ -267,6 +268,14 @@ func (m *Module) createDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Name == "" || req.DeviceType == "" {
 		httpx.Respond(w, r, nil, apierr.Invalid("name and device_type are required"))
+		return
+	}
+	if err := tenantref.MustExistAll(r.Context(), m.pool, id.TenantID,
+		[2]string{"device_model", req.ModelID},
+		[2]string{"farm", req.FarmID},
+		[2]string{"plot", req.PlotID},
+	); err != nil {
+		httpx.Respond(w, r, nil, err)
 		return
 	}
 	code := req.Code
