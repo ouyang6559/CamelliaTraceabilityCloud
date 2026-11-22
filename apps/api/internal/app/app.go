@@ -33,6 +33,7 @@ import (
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/modules/mission"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/modules/production"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/modules/quality"
+	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/modules/remotesensing"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/modules/stream"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/modules/sync"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/modules/trace"
@@ -190,6 +191,20 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 
 			alertModule.Mount(priv, authorize)
 			quality.NewModule(pool, traceSvc).Mount(priv, authorize)
+
+			// Phase 4 remote sensing (ADR-008): processor by configuration
+			// (mock default; NodeODM when CTC_NODEODM_URL set — specs/04.9).
+			var rsProcessor remotesensing.Processor = &remotesensing.MockProcessor{}
+			if cfg.NodeODMURL != "" {
+				rsProcessor = &remotesensing.NodeODMProcessor{
+					BaseURL: cfg.NodeODMURL,
+					Token:   cfg.NodeODMToken,
+				}
+				log.Info("nodeodm processor configured", "url", cfg.NodeODMURL)
+			}
+			rsWorker := remotesensing.NewWorker(pool, rsProcessor, pub, log)
+			rsWorker.Start(ctx)
+			remotesensing.NewAPI(pool).Mount(priv, authorize)
 
 			providers := sync.ProviderRegistry{
 				"mock": &traceadapter.Provider{},

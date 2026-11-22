@@ -165,7 +165,8 @@ func (api *RolesAPI) setPermissions(ctx context.Context, roleID string, codes []
 	}
 	for _, code := range codes {
 		if code == "*:*" {
-			// Admin shortcut: link every catalog permission.
+			// Admin shortcut: link every catalog permission + the wildcard row
+			// (the wildcard covers codes added to the catalog later).
 			if _, err := api.pool.Exec(ctx, `
 				INSERT INTO role_permissions (role_id, permission_id)
 				SELECT $1, id FROM permissions ON CONFLICT DO NOTHING`, roleID); err != nil {

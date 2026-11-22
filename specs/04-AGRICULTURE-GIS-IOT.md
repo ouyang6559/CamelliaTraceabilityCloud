@@ -136,6 +136,10 @@ Item
 Asset
 ```
 
+> **落地状态（2026-11-23）**：STAC-lite 目录已落地（`stac_items` 表 + `/stac` API，
+> OGC STAC 1.0.0 Item JSON），处理管线见 docs/adr/adr-008——mock 处理器全链路可演示，
+> NodeODM 客户端按公开 API 实现待真实实例联调；NDVI 待多光谱输入。
+
 ## 11. NDVI
 
 平台允许扩展：

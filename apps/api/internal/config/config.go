@@ -53,6 +53,11 @@ type Config struct {
 	RegistrationEnabled   bool
 	PlatformAdminPassword string
 
+	// Remote sensing (docs/adr/adr-008): NodeODM/WebODM processing node.
+	// Empty URL = mock processor only (specs/04.9, specs/06.10).
+	NodeODMURL   string
+	NodeODMToken string
+
 	LogLevel string
 }
 
@@ -87,6 +92,8 @@ func Load() *Config {
 		DJIWorkspace:          getenv("CTC_DJI_WORKSPACE", ""),
 		RegistrationEnabled:   getBool("CTC_REGISTRATION_ENABLED", true),
 		PlatformAdminPassword: getenv("CTC_PLATFORM_ADMIN_PASSWORD", "platform123"),
+		NodeODMURL:            getenv("CTC_NODEODM_URL", ""),
+		NodeODMToken:          getenv("CTC_NODEODM_TOKEN", ""),
 		LogLevel:              getenv("CTC_LOG_LEVEL", "info"),
 	}
 	if c.JWTSecret == "" {

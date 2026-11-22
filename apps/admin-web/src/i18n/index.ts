@@ -55,6 +55,8 @@ const resources = {
         auditLogs: '审计日志',
         tenant: '租户信息',
         platformAdmin: '平台管理',
+        smartAgri: '智能农业',
+        remoteSensing: '遥感',
       },
       common: {
         search: '搜索',
@@ -205,6 +207,16 @@ const resources = {
         telemetry: '遥测数据',
         latest: '最新状态',
       },
+      rs: {
+        jobsTab: '处理任务',
+        stacTab: 'STAC 资产目录',
+        newJob: '新建处理任务',
+        needImages: '请先上传影像文件',
+        uploadHint: '点击或拖拽上传无人机影像（JPG/TIFF）',
+        jobType: '处理类型',
+        submitJob: '提交任务（mock 处理器即时完成）',
+        openAsset: '打开资产',
+      },
       ai: {
         chat: 'AI 助手',
         placeholder: '询问农事建议、地块分析…',
@@ -269,6 +281,8 @@ const resources = {
         auditLogs: 'Audit Logs',
         tenant: 'Tenant',
         platformAdmin: 'Platform Admin',
+        smartAgri: 'Smart Agriculture',
+        remoteSensing: 'Remote Sensing',
       },
       common: {
         search: 'Search',
@@ -418,6 +432,16 @@ const resources = {
         capabilities: 'Capabilities',
         telemetry: 'Telemetry',
         latest: 'Latest Status',
+      },
+      rs: {
+        jobsTab: 'Processing Jobs',
+        stacTab: 'STAC Catalog',
+        newJob: 'New Processing Job',
+        needImages: 'Upload imagery files first',
+        uploadHint: 'Click or drag UAV imagery (JPG/TIFF)',
+        jobType: 'Processing type',
+        submitJob: 'Submit job (mock processor completes instantly)',
+        openAsset: 'Open asset',
       },
       ai: {
         chat: 'AI Assistant',

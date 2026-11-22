@@ -35,6 +35,9 @@ var Permissions = buildPermissions()
 
 func buildPermissions() []Permission {
 	var out []Permission
+	// The wildcard permission: tenant_admin links it so newly added catalog
+	// codes are covered automatically (migration 0012 backfills existing roles).
+	out = append(out, Permission{Code: "*:*", Resource: "*", Action: "*", Name: "All permissions"})
 	add := func(res string, acts ...string) {
 		for _, a := range acts {
 			out = append(out, Permission{
@@ -86,6 +89,7 @@ func buildPermissions() []Permission {
 	add("platform", biz...)
 	add("sync-task", biz...)
 	add("ai", "read", "create", "review")
+	add("remote-sensing", "read", "create", "update")
 	add("audit", "read")
 	add("dashboard", "read")
 	add("file", "create", "read")
@@ -107,6 +111,7 @@ var (
 		"device:read", "device-model:read", "telemetry:read", "mission:read", "mission:create",
 		"observation:read", "alert:read", "quality-test:read", "quality-report:read",
 		"dashboard:read", "file:create", "file:read", "inventory:read",
+		"remote-sensing:read", "remote-sensing:create",
 	}
 	ViewerPerms = []string{"*:read", "dashboard:read", "file:read"}
 )

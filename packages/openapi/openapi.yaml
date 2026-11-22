@@ -245,6 +245,20 @@ paths:
   /ai/jobs/{id}/review:
     post: { tags: [ai], summary: Human approve/reject of AI recommendation, responses: { "204": { description: No Content } } }
 
+  /remote-sensing/jobs:
+    get: { tags: [system], summary: "List processing jobs (Phase 4, status/mission filters)", responses: { "200": { description: OK } } }
+    post: { tags: [system], summary: "Create imagery processing job (orthophoto|ndvi|dem; mock or NodeODM processor)", responses: { "201": { description: Created } } }
+  /remote-sensing/jobs/{id}:
+    get: { tags: [system], summary: Job detail (inputs/outputs/progress), responses: { "200": { description: OK } } }
+  /remote-sensing/jobs/{id}/cancel:
+    post: { tags: [system], summary: Cancel queued/running job, responses: { "204": { description: No Content } } }
+  /stac/collections:
+    get: { tags: [system], summary: STAC collections (per job type), responses: { "200": { description: OK } } }
+  /stac/collections/{collection}/items:
+    get: { tags: [system], summary: STAC items in collection, responses: { "200": { description: OK } } }
+    post: { tags: [system], summary: Import an external asset (file_id) as a STAC item, responses: { "201": { description: Created } } }
+  /stac/collections/{collection}/items/{id}:
+    get: { tags: [system], summary: One STAC item, responses: { "200": { description: OK } } }
   /files:
     post: { tags: [system], summary: Multipart upload -> {id, sha256}, responses: { "201": { description: Created } } }
   /files/{id}/content:

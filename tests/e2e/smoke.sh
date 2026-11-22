@@ -245,4 +245,27 @@ AMB=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$API/auth/login" -H 'Conte
   -d "{\"username\":\"dup-$TAG\",\"password\":\"duppass123\"}")
 [ "$AMB" = "409" ] && ok "ambiguous login returns 409 with tenant options"
 
+step "remote sensing: upload imagery + create processing job"
+IMG=$(curl -sf -X POST "$API/files" -H "$AUTH" -F "file=@tests/e2e/fixtures/sample-image.txt;type=image/tiff")
+IMG_ID=$(echo "$IMG" | jqget "['id']")
+[ -n "$IMG_ID" ] && ok "imagery uploaded ($IMG_ID)"
+RS=$(curl -sf -X POST "$API/remote-sensing/jobs" -H "$AUTH" -H 'Content-Type: application/json' -d "{
+  \"job_type\":\"orthophoto\",\"file_ids\":[\"$IMG_ID\"],\"processor\":\"mock\"}")
+RS_ID=$(echo "$RS" | jqget "['id']")
+[ -n "$RS_ID" ] && ok "job queued ($RS_ID)"
+
+step "remote sensing: worker processes job -> succeeded"
+deadline=$(($(date +%s) + 15))
+RS_STATUS="queued"
+while [ "$(date +%s)" -lt "$deadline" ]; do
+  RS_STATUS=$(curl -sf "$API/remote-sensing/jobs/$RS_ID" -H "$AUTH" | jqget "['status']")
+  [ "$RS_STATUS" = "succeeded" ] && break
+  sleep 1
+done
+[ "$RS_STATUS" = "succeeded" ] && ok "job succeeded via mock processor"
+
+step "remote sensing: STAC catalog exposes the orthophoto asset"
+curl -sf "$API/stac/collections" -H "$AUTH" | grep -q 'orthophoto' && ok "collection listed"
+curl -sf "$API/stac/collections/orthophoto/items" -H "$AUTH" | grep -q "$RS_ID" && ok "stac item published"
+
 printf '\n\033[32m===== SMOKE RESULT: %d steps passed =====\033[0m\n' "$PASS"

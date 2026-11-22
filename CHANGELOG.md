@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### Added — Phase 4 遥感基线：STAC 目录 + 影像任务管线（ADR-008）
+- `remote_sensing_jobs` + 后台 Worker：queued→running→succeeded/failed 状态机、
+  进度上报、NATS `remote-sensing.*` 事件
+- `Processor` 接口：mock（确定性演示处理器）+ NodeODM 真实客户端（公开 API，
+  无实例时诚实失败，specs/06.10/06.11）
+- STAC-lite 资产目录：OGC STAC 1.0.0 Item JSON 按租户/collection 存储，
+  `GET /stac/collections`、items 列表/详情、手动导入外部正射影像
+- API 增权限码 `remote-sensing:read/create/update`（operator 含 read/create）
+- 前端「智能农业 → 遥感」页：任务列表/上传创建/STAC 目录浏览（中英双语）
+- 冒烟新增遥感段：文件上传 → 建任务 → worker 处理 → STAC 资产断言
+
 ### Added — Phase 3 设备适配器：MAVLink + ROS 2（ADR-007）
 - **MAVLink adapter**（`adapters/device/mavlink`，gomavlib v4）：ArduPilot/PX4
   生态真机接入——遥测（GPS/高度/电池/解锁）、任务上传完整协议

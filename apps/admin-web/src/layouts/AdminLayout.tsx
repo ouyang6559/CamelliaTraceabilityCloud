@@ -96,6 +96,14 @@ export default function AdminLayout() {
         { key: '/sync-tasks', icon: <SyncOutlined />, label: t('nav.syncTasks') },
       ],
     },
+    {
+      key: 'smart-agri',
+      icon: <GlobalOutlined />,
+      label: t('nav.smartAgri'),
+      children: [
+        { key: '/remote-sensing', icon: <GlobalOutlined />, label: t('nav.remoteSensing') },
+      ],
+    },
     { key: '/ai', icon: <RobotOutlined />, label: t('nav.ai') },
     ...(user?.platform_admin
       ? [{ key: '/platform/tenants', icon: <CloudServerOutlined />, label: t('nav.platformAdmin') }]

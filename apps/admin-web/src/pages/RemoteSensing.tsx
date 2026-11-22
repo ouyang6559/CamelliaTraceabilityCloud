@@ -1,0 +1,219 @@
+import { useRef, useState } from 'react'
+import {
+  Button, Card, Form, Input, message, Modal, Select, Space, Table, Tabs, Tag, Upload, Typography,
+} from 'antd'
+import {
+  CloudUploadOutlined, ReloadOutlined, GlobalOutlined, FileImageOutlined,
+} from '@ant-design/icons'
+import type { ColumnsType } from 'antd/es/table'
+import { useTranslation } from 'react-i18next'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { apiError, getJSON, listPage, postJSON, uploadFile } from '../api/client'
+
+const statusColor: Record<string, string> = {
+  queued: 'default', running: 'orange', succeeded: 'green', failed: 'red', cancelled: 'default',
+}
+
+/** 遥感（Phase 4 基线，ADR-008）：影像处理任务（mock/NodeODM）+ STAC 资产目录。 */
+export default function RemoteSensing() {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [tab, setTab] = useState('jobs')
+  const [modalOpen, setModalOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [uploaded, setUploaded] = useState<{ file_id: string; filename: string }[]>([])
+  const [statusFilter, setStatusFilter] = useState('')
+  const [collection, setCollection] = useState('orthophoto')
+  const uploadRef = useRef<ReturnType<typeof Upload.Dragger>>(null)
+
+  const jobs = useQuery({
+    queryKey: ['rs-jobs', statusFilter],
+    queryFn: () => {
+      const params: Record<string, unknown> = {}
+      if (statusFilter) params.status = statusFilter
+      return listPage<Record<string, unknown>>('/remote-sensing/jobs', params)
+    },
+    refetchInterval: 3000,
+  })
+
+  const collections = useQuery({
+    queryKey: ['stac-collections'],
+    queryFn: () => getJSON<{ collections: { id: string; item_count: number }[] }>('/stac/collections'),
+  })
+
+  const items = useQuery({
+    queryKey: ['stac-items', collection],
+    queryFn: () => listPage<Record<string, unknown>>(`/stac/collections/${collection}/items`),
+    enabled: tab === 'stac',
+  })
+
+  async function handleUpload(file: File) {
+    try {
+      const res = await uploadFile(file)
+      setUploaded((u) => [...u, { file_id: res.id, filename: file.name }])
+      message.success(`${file.name} ✓`)
+    } catch (err) {
+      message.error(apiError(err))
+    }
+    return false // prevent antd default upload
+  }
+
+  async function createJob(values: { job_type: string; mission_id?: string }) {
+    if (uploaded.length === 0) {
+      message.error(t('rs.needImages'))
+      return
+    }
+    setCreating(true)
+    try {
+      await postJSON('/remote-sensing/jobs', {
+        job_type: values.job_type,
+        mission_id: values.mission_id || '',
+        file_ids: uploaded.map((u) => u.file_id),
+      })
+      message.success(t('common.success'))
+      setModalOpen(false)
+      setUploaded([])
+      void qc.invalidateQueries({ queryKey: ['rs-jobs'] })
+    } catch (err) {
+      message.error(apiError(err))
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const jobColumns: ColumnsType<Record<string, unknown>> = [
+    { key: 'job_type', title: '类型', dataIndex: 'job_type', width: 110,
+      render: (v: string) => <Tag color="geekblue">{v}</Tag> },
+    { key: 'status', title: t('common.status'), dataIndex: 'status', width: 110,
+      render: (v: string) => <Tag color={statusColor[v] ?? 'default'}>{t(`status.${v}`) !== `status.${v}` ? t(`status.${v}`) : v}</Tag> },
+    { key: 'progress', title: '进度', dataIndex: 'progress', width: 100,
+      render: (v: unknown) => `${Number(v ?? 0)}%` },
+    { key: 'processor', title: '处理器', dataIndex: 'processor', width: 100 },
+    { key: 'mission_id', title: '任务', dataIndex: 'mission_id', width: 150,
+      render: (v: string) => v ? <span className="mono">{v.slice(0, 12)}…</span> : '-' },
+    { key: 'created_at', title: t('common.createdAt'), dataIndex: 'created_at', width: 170,
+      render: (v: string) => v?.slice(0, 19).replace('T', ' ') },
+    { key: 'error', title: '错误', dataIndex: 'error',
+      render: (v: string) => v ? <Typography.Text type="danger">{String(v).slice(0, 40)}</Typography.Text> : '-' },
+  ]
+
+  const itemColumns: ColumnsType<Record<string, unknown>> = [
+    { key: 'id', title: 'STAC ID', dataIndex: 'id',
+      render: (v: string) => <span className="mono">{v.slice(0, 16)}…</span> },
+    { key: 'collection_id', title: '集合', dataIndex: 'collection_id', width: 120 },
+    { key: 'job_id', title: '任务', dataIndex: 'job_id', width: 150,
+      render: (v: unknown) => (v ? <span className="mono">{String(v).slice(0, 12)}…</span> : '手动导入') },
+    { key: 'created_at', title: t('common.createdAt'), dataIndex: 'created_at', width: 170,
+      render: (v: string) => v?.slice(0, 19).replace('T', ' ') },
+    { key: 'actions', title: t('common.actions'), width: 120,
+      render: (_, row) => (
+        <a onClick={() => {
+          const item = row.item as { assets?: Record<string, { href: string }> } | null
+          const asset = item?.assets ? Object.values(item.assets)[0] : null
+          if (asset?.href) window.open(asset.href, '_blank')
+        }}>
+          <FileImageOutlined /> {t('rs.openAsset')}
+        </a>
+      ) },
+  ]
+
+  return (
+    <Card className="page-card">
+      <Tabs
+        activeKey={tab}
+        onChange={setTab}
+        items={[
+          {
+            key: 'jobs',
+            label: t('rs.jobsTab'),
+            children: (
+              <>
+                <div className="toolbar">
+                  <Select
+                    allowClear placeholder={t('common.status')} style={{ width: 140 }}
+                    options={['queued', 'running', 'succeeded', 'failed', 'cancelled'].map((v) => ({ value: v, label: v }))}
+                    onChange={(v) => setStatusFilter(v ?? '')}
+                  />
+                  <Button icon={<ReloadOutlined />} onClick={() => void jobs.refetch()}>{t('common.refresh')}</Button>
+                  <Button type="primary" icon={<CloudUploadOutlined />} onClick={() => setModalOpen(true)}>
+                    {t('rs.newJob')}
+                  </Button>
+                </div>
+                <Table
+                  rowKey="id"
+                  columns={jobColumns}
+                  dataSource={jobs.data?.items ?? []}
+                  loading={jobs.isLoading}
+                  pagination={{ pageSize: 20, total: jobs.data?.total ?? 0 }}
+                />
+              </>
+            ),
+          },
+          {
+            key: 'stac',
+            label: t('rs.stacTab'),
+            children: (
+              <>
+                <div className="toolbar">
+                  <Select
+                    style={{ width: 180 }}
+                    value={collection}
+                    onChange={setCollection}
+                    options={(collections.data?.collections ?? []).map((c) => ({
+                      value: c.id, label: `${c.id} (${c.item_count})`,
+                    }))}
+                  />
+                  <Button icon={<GlobalOutlined />} onClick={() => void collections.refetch()}>
+                    {t('common.refresh')}
+                  </Button>
+                </div>
+                <Table
+                  rowKey="id"
+                  columns={itemColumns}
+                  dataSource={items.data?.items ?? []}
+                  loading={items.isLoading}
+                  pagination={{ pageSize: 20, total: items.data?.total ?? 0 }}
+                />
+              </>
+            ),
+          },
+        ]}
+      />
+
+      <Modal
+        open={modalOpen}
+        title={t('rs.newJob')}
+        onCancel={() => { setModalOpen(false); setUploaded([]) }}
+        destroyOnClose
+        footer={null}
+      >
+        <Upload.Dragger multiple beforeUpload={handleUpload} accept="image/*,.tif,.tiff">
+          <p style={{ fontSize: 28, margin: '8px 0' }}>☁️</p>
+          <Typography.Text>{t('rs.uploadHint')}</Typography.Text>
+        </Upload.Dragger>
+        <div style={{ margin: '12px 0' }}>
+          {uploaded.map((u) => (
+            <Tag key={u.file_id} closable onClose={() => setUploaded((list) => list.filter((x) => x.file_id !== u.file_id))}>
+              {u.filename}
+            </Tag>
+          ))}
+        </div>
+        <Form layout="vertical" onFinish={createJob}>
+          <Form.Item name="job_type" label={t('rs.jobType')} initialValue="orthophoto" rules={[{ required: true }]}>
+            <Select options={[
+              { value: 'orthophoto', label: '正射影像 Orthophoto' },
+              { value: 'ndvi', label: 'NDVI 植被指数' },
+              { value: 'dem', label: '高程 DEM' },
+            ]} />
+          </Form.Item>
+          <Form.Item name="mission_id" label="关联任务 ID（可选）">
+            <Input placeholder="missions/{id}" />
+          </Form.Item>
+          <Button type="primary" htmlType="submit" block loading={creating}>
+            {t('rs.submitJob')}
+          </Button>
+        </Form>
+      </Modal>
+    </Card>
+  )
+}

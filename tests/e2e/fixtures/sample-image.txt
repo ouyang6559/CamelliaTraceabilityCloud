@@ -1,0 +1,1 @@
+CTC smoke fixture: simulated multispectral UAV frame (not a real TIFF).
