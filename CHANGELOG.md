@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### Added — Phase 6 AI 深化：知识库 RAG-lite（ADR-009）
+- `knowledge_docs` + `knowledge_chunks`（租户隔离），粘贴/.txt/.md 导入，
+  段落优先分块（≤400 rune 滑窗 + 40 重叠）
+- Go 层检索评分：查询分词（拉丁词 + CJK 二元组）→ 分块计分 → 每文档 Top 命中
+  → Top-4 注入对话上下文（诚实标注 RAG-lite；pgvector 为后续升级）
+- `POST /ai/chat` 增 `use_knowledge`：回答携带 `sources[]` 引用（可追溯，specs/07.7）
+- 前端 AI 助手改 Tabs：对话（知识库开关 + 来源标签）/ 知识库管理（导入/删除）/
+  任务记录
+- 冒烟新增 RAG 段：导入施肥规程 → use_knowledge 对话 → 断言回答引用来源
+
 ### Added — Phase 4 遥感基线：STAC 目录 + 影像任务管线（ADR-008）
 - `remote_sensing_jobs` + 后台 Worker：queued→running→succeeded/failed 状态机、
   进度上报、NATS `remote-sensing.*` 事件

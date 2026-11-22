@@ -105,6 +105,10 @@ RAG 数据：
 - user
 - approval
 
+> **落地状态（2026-11-23）**：知识库 RAG-lite 已落地（docs/adr/adr-009）——§6 的
+> RAG 数据通过 `knowledge_docs/chunks`（粘贴或 .txt/.md 导入）承载，检索为 Go 层
+> 关键词评分（CJK 二元组），对话回答携带 sources 引用；向量检索为后续升级。
+
 ## 8. 禁止
 
 AI 不得未经授权：

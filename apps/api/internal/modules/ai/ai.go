@@ -58,13 +58,18 @@ func (m *Module) Mount(r chi.Router, authorize func(resource, action string) fun
 		rr.With(authorize("ai", "create")).Post("/chat", m.chat)
 		rr.With(authorize("ai", "create")).Post("/vision", m.vision)
 		rr.With(authorize("ai", "review")).Post("/jobs/{id}/review", m.review)
+		rr.Get("/knowledge", m.listKnowledge)
+		rr.With(authorize("ai", "create")).Post("/knowledge", m.createKnowledge)
+		rr.With(authorize("ai", "create")).Post("/knowledge/import", m.importKnowledgeFile)
+		rr.With(authorize("ai", "create")).Delete("/knowledge/{id}", m.deleteKnowledge)
 	})
 }
 
 type chatWrite struct {
-	Messages    []chatMessage `json:"messages"`
-	ContextRef  string        `json:"context_ref"` // optional ref: plot_id / batch_id / device_id
-	ContextType string        `json:"context_type"`
+	Messages     []chatMessage `json:"messages"`
+	ContextRef   string        `json:"context_ref"` // optional ref: plot_id / batch_id / device_id
+	ContextType  string        `json:"context_type"`
+	UseKnowledge bool          `json:"use_knowledge"` // RAG-lite: retrieve tenant knowledge base (ADR-009)
 }
 type chatMessage struct {
 	Role    string `json:"role"`
@@ -88,6 +93,16 @@ func (m *Module) chat(w http.ResponseWriter, r *http.Request) {
 		prompt += msg.Role + ": " + msg.Content + "\n"
 	}
 
+	// RAG-lite retrieval (ADR-009): inject knowledge excerpts + track sources.
+	var sources []KnowledgeSource
+	if req.UseKnowledge && len(req.Messages) > 0 {
+		query := req.Messages[len(req.Messages)-1].Content
+		if srcs, err := m.retrieveKnowledge(r.Context(), id.TenantID, query); err == nil && len(srcs) > 0 {
+			sources = srcs
+			prompt = buildKnowledgeContext(srcs) + "\n" + prompt
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 	output, outputType, confidence, err := m.provider.Chat(ctx, prompt, map[string]any{
@@ -98,13 +113,17 @@ func (m *Module) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jobID := m.recordJob(r.Context(), id, "chat", prompt, output, outputType, confidence, req.ContextType, req.ContextRef)
-	httpx.Respond(w, r, map[string]any{
+	resp := map[string]any{
 		"job_id":      jobID,
 		"output":      output,
 		"output_type": outputType,
 		"confidence":  confidence,
 		"disclaimer":  "AI-generated recommendation, not an instruction; confirm before acting",
-	}, nil)
+	}
+	if len(sources) > 0 {
+		resp["sources"] = sources
+	}
+	httpx.Respond(w, r, resp, nil)
 }
 
 type visionWrite struct {

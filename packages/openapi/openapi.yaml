@@ -244,6 +244,15 @@ paths:
     get: { tags: [ai], summary: AI job history + reviews, responses: { "200": { description: OK } } }
   /ai/jobs/{id}/review:
     post: { tags: [ai], summary: Human approve/reject of AI recommendation, responses: { "204": { description: No Content } } }
+  /ai/knowledge:
+    get: { tags: [ai], summary: List knowledge documents (RAG-lite source), responses: { "200": { description: OK } } }
+    post: { tags: [ai], summary: Import knowledge document (paste text; chunked for retrieval), responses: { "201": { description: id + chunks } } }
+  /ai/knowledge/import:
+    post: { tags: [ai], summary: Import .txt/.md file as knowledge document, responses: { "201": { description: id + chunks } } }
+  /ai/knowledge/{id}:
+    delete: { tags: [ai], summary: Delete knowledge document (+ chunks), responses: { "204": { description: No Content } } }
+  /ai/chat (use_knowledge=true):
+    post: { tags: [ai], summary: Chat with knowledge retrieval — response carries sources[] citations, responses: { "200": { description: output + sources } } }
 
   /remote-sensing/jobs:
     get: { tags: [system], summary: "List processing jobs (Phase 4, status/mission filters)", responses: { "200": { description: OK } } }

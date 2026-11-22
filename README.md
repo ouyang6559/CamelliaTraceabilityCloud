@@ -106,7 +106,8 @@ Phase 0/1（已完成，含**真机执行链路** + **SaaS 多租户**：自助�
 `rosbridge`（ROS 2 无人车，rosbridge 协议测试）已实现；DJI 上云API（需企业凭证）、
 XAG（需商业授权）为官方对接项（[ADR-007](docs/adr/adr-007-device-adapters-phase3.md)）
 → Phase 4 遥感基线（✅ STAC 目录 + 影像任务管线，NodeODM 接口就绪）
-→ Phase 2 IoT 增强 → Phase 5 官方溯源平台接入 → Phase 6 AI（RAG/Vision）。
+→ Phase 6 AI 深化（✅ 知识库 RAG-lite：文档导入/分块检索/来源引用；Vision 待多模态）
+→ Phase 2 IoT 增强 → Phase 5 官方溯源平台接入。
 实现任一厂商适配器 = 实现 `device.Adapter` 接口 + 注册一行，核心零改动（[ADR-005](docs/adr/adr-005-mission-device-dispatch.md)）。
 详见 [specs/14-ROADMAP.md](specs/14-ROADMAP.md) 与 [specs/24-PHASE0-IMPLEMENTATION-DECISIONS.md](specs/24-PHASE0-IMPLEMENTATION-DECISIONS.md)。
 
