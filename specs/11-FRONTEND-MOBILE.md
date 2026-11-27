@@ -93,6 +93,11 @@ MapLibre GL JS
 - 入库
 - 异常
 
+> **落地状态（2026-11-28）**：`/mobile/tasks` 今日任务执行页已落地——
+> 今日任务列表（开始/完成）、GPS 采集（浏览器 geolocation，附带完成记录 →
+> TraceEvent）；响应式窄屏优化。扫码（一物一码查询）复用 trace-web；
+> PWA 离线采集队列（IndexedDB）为后续项。
+
 ## 4. 离线
 
 使用 IndexedDB / 本地缓存。
