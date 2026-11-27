@@ -165,6 +165,9 @@ const resources = {
         eventTrend: '近 14 天溯源事件',
         recentAlerts: '最新告警',
         upcomingTasks: '近期任务',
+        liveEvents: '实时事件',
+        newAlert: '新告警',
+        liveEmpty: '等待事件…（触发任务/遥测/告警后实时显示）',
       },
       tasks: {
         complete: '完成任务',
@@ -418,6 +421,9 @@ const resources = {
         eventTrend: 'Trace Events (14d)',
         recentAlerts: 'Recent Alerts',
         upcomingTasks: 'Upcoming Tasks',
+        liveEvents: 'Live Events',
+        newAlert: 'New alert',
+        liveEmpty: 'Waiting for events… (missions/telemetry/alerts appear live)',
       },
       tasks: {
         complete: 'Complete',

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useQuery } from '@tanstack/react-query'
 import ReactECharts from 'echarts-for-react'
 import { Link } from 'react-router-dom'
+import LiveEvents from '../components/LiveEvents'
 import { getJSON } from '../api/client'
 
 interface Summary {
@@ -36,7 +37,7 @@ export default function Dashboard() {
 
   const trendOption = {
     grid: { left: 40, right: 16, top: 24, bottom: 28 },
-    xAxis: { type: 'category', data: (data?.event_trend ?? []).map((d) => String(d.day).slice(5)) },
+    xAxis: { type: 'category', data: (data?.event_trend ?? []).map((d) => String(d.day).slice(5, 10)) },
     yAxis: { type: 'value', minInterval: 1 },
     series: [{ type: 'line', smooth: true, areaStyle: { opacity: 0.15 }, data: (data?.event_trend ?? []).map((d) => d.events), itemStyle: { color: '#2e7d32' } }],
     tooltip: { trigger: 'axis' },
@@ -59,6 +60,9 @@ export default function Dashboard() {
           <Card title={t('dashboard.eventTrend')} size="small">
             <ReactECharts option={trendOption} style={{ height: 260 }} />
           </Card>
+        </Col>
+        <Col xs={24} lg={10}>
+          <LiveEvents />
         </Col>
         <Col xs={24} lg={10}>
           <Card title={t('dashboard.recentAlerts')} size="small">
