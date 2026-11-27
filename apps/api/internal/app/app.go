@@ -15,6 +15,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/redis/go-redis/v9"
 
+	djiAdapter "github.com/ouyang6559/CamelliaTraceabilityCloud/adapters/device/dji"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/adapters/device/genericmqtt"
 	mavlinkAdapter "github.com/ouyang6559/CamelliaTraceabilityCloud/adapters/device/mavlink"
 	rosbridgeAdapter "github.com/ouyang6559/CamelliaTraceabilityCloud/adapters/device/rosbridge"
@@ -137,6 +138,10 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 	}
 	deviceRegistry.Register("mavlink", mavlinkAdapter.New(log))
 	log.Info("device adapter registered", "type", "mavlink")
+	// dji-cloud skeleton: OSD telemetry loopback-tested; mission ops fail
+	// honestly until enterprise credentials + hardware validation (specs/03.6).
+	deviceRegistry.Register("dji-cloud", djiAdapter.New(log))
+	log.Info("device adapter registered", "type", "dji-cloud")
 	deviceRegistry.Register("rosbridge", rosbridgeAdapter.New(log))
 	log.Info("device adapter registered", "type", "rosbridge")
 	if cfg.DJIAppKey != "" {
