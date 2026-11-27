@@ -28,7 +28,9 @@ UAV                   UAV/UGV  Robot
 > - `mavlink`（P0，TASK-030 ✅：任务上传协议/解锁/任务启动/暂停恢复/RTL，mock 载具回环测试）
 > - `rosbridge`（P0 ROS 2，TASK-031 ✅：**Nav2 action 协议**（send_action_goal/
 >   action_result 逐航点校验）+ /goal_pose 话题回退（nav_mode="topic"）+ /cmd_vel 停车）
-> - DJI 上云API（TASK-032）与 XAG（TASK-033）待官方凭证/授权（不得伪造），目录占位。
+> - `dji-cloud`（TASK-032 骨架 ✅：OSD 遥测 MQTT 接入按公开文档实现 + 回环测试；
+>   flighttask 任务操作为诚实 TODO，需企业凭证 + 硬件验证）
+> - XAG（TASK-033）待官方凭证/授权（不得伪造），目录占位。
 
 建议接口：
 
