@@ -16,6 +16,14 @@ jobs:
         with:
           go-version: "1.24"
           cache: true
+      # MQTT broker for the DJI OSD loopback test (adapters/device/dji);
+      # the test skips gracefully when no broker is reachable.
+      - name: Start mosquitto for MQTT loopback tests
+        run: |
+          printf 'listener 1883 0.0.0.0\nallow_anonymous true\n' > /tmp/mosquitto.conf
+          docker run -d --rm --name mosquitto -p 1883:1883 \
+            -v /tmp/mosquitto.conf:/mosquitto/config/mosquitto.conf \
+            eclipse-mosquitto:2
       - name: Build
         run: go build ./...
       - name: Vet
