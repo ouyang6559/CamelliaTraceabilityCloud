@@ -108,7 +108,7 @@ func (s *Service) Append(ctx context.Context, tenantID string, in EventInput) (m
 			to_jsonb(COALESCE($22::jsonb, '{}'::jsonb)),
 			$23, $24, $25, $26)`,
 		newID, tenantID, in.EventType, in.EventTime, in.Title, in.Description,
-		nullStr(in.FarmID), nullStr(in.PlotID), nullStr(in.CropBatchID), nullStr(in.RefType), nullStr(in.RefID),
+		nullStr(in.FarmID), nullStr(in.PlotID), nullStr(in.CropBatchID), in.RefType, in.RefID,
 		nullStr(in.TaskID), nullStr(in.DeviceID), nullStr(in.MissionID), nullStr(in.OperatorID),
 		locVal, in.Quantity, in.Unit,
 		jsonOrNil(in.Inputs), jsonOrNil(in.Media), jsonOrNil(in.Weather), jsonOrNil(in.Metadata),

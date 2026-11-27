@@ -274,6 +274,16 @@ IMP=$(curl -sf -X POST "$API/stac/collections/orthophoto/items" -H "$AUTH" -H 'C
 echo "$IMP" | grep -q 'Polygon' || { BODY=$(curl -sf "$API/stac/collections/orthophoto/items" -H "$AUTH"); echo "$BODY" | grep -q 'Polygon' && ok "footprint polygon (in list)"; } || true
 curl -sf "$API/stac/collections/orthophoto/items" -H "$AUTH" | grep -q 'Polygon' && ok "footprint polygon served for map overlay"
 
+step "api: Idempotency-Key replay (specs/09.8)"
+IDEM_KEY="idem-$TAG"
+IDEM_BODY='{"event_type":"note","title":"幂等测试","description":"same key same response"}'
+R1=$(curl -sf -X POST "$API/trace-events" -H "$AUTH" -H 'Content-Type: application/json' -H "Idempotency-Key: $IDEM_KEY" -d "$IDEM_BODY")
+R2=$(curl -sf -X POST "$API/trace-events" -H "$AUTH" -H 'Content-Type: application/json' -H "Idempotency-Key: $IDEM_KEY" -d "$IDEM_BODY")
+[ "$R1" = "$R2" ] && ok "duplicate key replays identical response"
+echo "$R1" | grep -q '"hash"' && ok "first create stored (hash chain)"
+R3=$(curl -sf -X POST "$API/trace-events" -H "$AUTH" -H 'Content-Type: application/json' -d "$IDEM_BODY")
+[ "$R3" != "$R1" ] && ok "different request (no key) creates new event"
+
 step "ai knowledge: import doc + RAG chat with sources"
 curl -sf -X POST "$API/ai/knowledge" -H "$AUTH" -H 'Content-Type: application/json' -d "{
   \"title\":\"油茶施肥规程\",\"category\":\"肥料\",\"content\":\"油茶春季施肥应在 3 月进行，使用有机肥每株 2 公斤，沿树冠滴水线开沟施入后覆土。夏季追肥以磷钾肥为主。冬季结合修剪施足基肥。\"}" > /dev/null

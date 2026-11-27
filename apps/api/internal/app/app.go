@@ -160,6 +160,7 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 	auth := middleware.Auth(jwt)
 	auditMW := middleware.Audit(pool, log)
 	rateLimit := middleware.RateLimit(rdb, 600, time.Minute)
+	idempotency := middleware.Idempotency(rdb) // specs/09.8: replay-safe writes
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -188,6 +189,10 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 		// Private API: JWT + audit middleware for everything below.
 		api.Group(func(priv chi.Router) {
 			priv.Use(auth)
+			// Idempotency-Key replay protection (specs/09.8): active only on
+			// requests carrying the header — covers create mission / trace
+			// event / trace code / blockchain proof / sync task POSTs.
+			priv.Use(idempotency)
 			priv.Use(auditMW)
 
 			agri := agriculture.NewModule(pool, traceSvc, pub)
