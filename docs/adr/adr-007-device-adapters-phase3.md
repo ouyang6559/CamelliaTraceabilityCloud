@@ -21,6 +21,13 @@
 - 所有 COMMAND_ACK 等待 + 结果校验；任务上传超时按航点数动态计算。
 
 ### 2. ROS 2 rosbridge 适配器（`adapters/device/rosbridge/`，adapter_type=`rosbridge`）
+
+> **升级（2026-11-28，ADR-012 关联）**：任务执行从 `/goal_pose` 话题升级为
+> **rosbridge v2 action 协议**——`send_action_goal`（/navigate_to_pose，
+> nav2_msgs/action/NavigateToPose）→ `action_feedback`（distance_remaining 进度）
+> → `action_result`（GoalStatus 校验，逐航点完成确认）；暂停 = `cancel_action`
+> + 零速度；设备 metadata `nav_mode="topic"` 保留话题回退路径（无 Nav2 的简单底盘）。
+> 回环测试覆盖两种模式。
 - 基于 gorilla/websocket，实现 rosbridge v2 JSON 协议（subscribe/publish）。
 - Endpoint：设备 metadata `endpoint` = `ws://host:9090`（rosbridge_server）。
 - 已实现：

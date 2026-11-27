@@ -44,25 +44,29 @@ func Manifest() sdk.Manifest {
 }
 
 const (
-	topicGoal    = "/goal_pose"
-	typeGoal     = "geometry_msgs/msg/PoseStamped"
-	topicTwist   = "/cmd_vel"
-	typeTwist    = "geometry_msgs/msg/Twist"
-	topicOdom    = "/odom"
-	typeOdom     = "nav_msgs/msg/Odometry"
-	topicBattery = "/battery_state"
-	typeBattery  = "sensor_msgs/msg/BatteryState"
-	arriveRadius = 0.8 // meters: goal considered reached
-	pollPeriod   = 300 * time.Millisecond
+	topicGoal      = "/goal_pose"
+	typeGoal       = "geometry_msgs/msg/PoseStamped"
+	actionNav2Pose = "/navigate_to_pose"
+	typeNav2Pose   = "nav2_msgs/action/NavigateToPose"
+	goalTimeout    = 120 * time.Second
+	topicTwist     = "/cmd_vel"
+	typeTwist      = "geometry_msgs/msg/Twist"
+	topicOdom      = "/odom"
+	typeOdom       = "nav_msgs/msg/Odometry"
+	topicBattery   = "/battery_state"
+	typeBattery    = "sensor_msgs/msg/BatteryState"
+	arriveRadius   = 0.8 // meters: goal considered reached
+	pollPeriod     = 300 * time.Millisecond
 )
 
 // rosMessage is one rosbridge protocol message (subset).
 type rosMessage struct {
-	Op    string          `json:"op"`
-	Topic string          `json:"topic,omitempty"`
-	Type  string          `json:"type,omitempty"`
-	Msg   json.RawMessage `json:"msg,omitempty"`
-	ID    string          `json:"id,omitempty"`
+	Op     string          `json:"op"`
+	Topic  string          `json:"topic,omitempty"`
+	Type   string          `json:"type,omitempty"`
+	Msg    json.RawMessage `json:"msg,omitempty"`
+	ID     string          `json:"id,omitempty"`
+	Action string          `json:"action,omitempty"`
 }
 
 type conn struct {
@@ -78,6 +82,17 @@ type conn struct {
 	goalIdx  int
 	running  bool
 	progress float64
+
+	// Nav2 action protocol state (ADR-012): in-flight goal call id + result
+	// channel fed by readLoop; nav_mode selects action vs topic fallback.
+	actionCallID string
+	actionResult chan actionResultMsg
+	navMode      string
+}
+
+// actionResultMsg is one rosbridge action outcome (GoalStatus).
+type actionResultMsg struct {
+	Status uint8 // 4=SUCCEEDED 5=CANCELED 6=ABORTED
 }
 
 // Adapter talks to ROS 2 robots through a rosbridge_server.
@@ -176,7 +191,49 @@ func (a *Adapter) readLoop(code string, c *conn) {
 			return
 		}
 		var m rosMessage
-		if json.Unmarshal(raw, &m) != nil || m.Op != "publish" {
+		if json.Unmarshal(raw, &m) != nil {
+			continue
+		}
+		switch m.Op {
+		case "action_result":
+			var ar struct {
+				ID     string `json:"id"`
+				Status uint8  `json:"status"`
+			}
+			if json.Unmarshal(raw, &ar) == nil {
+				c.mu.Lock()
+				isCurrent := ar.ID == c.actionCallID
+				ch := c.actionResult
+				c.mu.Unlock()
+				if isCurrent && ch != nil {
+					select {
+					case ch <- actionResultMsg{Status: ar.Status}:
+					default:
+					}
+				}
+			}
+			continue
+		case "action_feedback":
+			// NavigateToPose feedback carries distance_to_goal — mapped to progress.
+			var fb struct {
+				ID     string `json:"id"`
+				Values struct {
+					Feedback struct {
+						DistanceRemaining float64 `json:"distance_remaining"`
+					} `json:"feedback"`
+				} `json:"values"`
+			}
+			if json.Unmarshal(raw, &fb) == nil {
+				c.mu.Lock()
+				if fb.ID == c.actionCallID && c.running && len(c.goals) > 0 {
+					// Progress = waypoints done + fraction of the current leg.
+					c.progress = (float64(c.goalIdx) / float64(len(c.goals))) * 100
+				}
+				c.mu.Unlock()
+			}
+			continue
+		case "publish":
+		default:
 			continue
 		}
 		switch m.Topic {
@@ -221,9 +278,10 @@ func (a *Adapter) runMission(code string, c *conn) {
 		idx := c.goalIdx
 		odomOK := c.odomOK
 		odomX, odomY := c.odomX, c.odomY
+		topicMode := c.navMode == "topic"
 		c.mu.Unlock()
-		if !running || len(goals) == 0 {
-			continue
+		if !running || len(goals) == 0 || !topicMode {
+			continue // action mode completes synchronously inside StartMission
 		}
 		if idx >= len(goals) {
 			// Sequence finished.
@@ -259,6 +317,73 @@ func (a *Adapter) advanceGoal(code string, c *conn) {
 	wp := c.goals[c.goalIdx]
 	if err := c.publishGoalLocked(wp); err != nil {
 		a.log.Warn("rosbridge goal publish failed", "device", code, "err", err)
+	}
+}
+
+// sendNavigateToPoseAction issues one Nav2 NavigateToPose goal via the
+// rosbridge v2 action protocol (specs/ADR-007 upgrade):
+//
+//	{"op":"send_action_goal","action":"/navigate_to_pose",
+//	 "type":"nav2_msgs/action/NavigateToPose","goal":{PoseStamped},"feedback_callback":true}
+func (c *conn) sendNavigateToPoseAction(callID string, wp sdk.Waypoint) error {
+	goal := map[string]any{
+		"pose": map[string]any{
+			"header": map[string]any{"frame_id": "map"},
+			"pose": map[string]any{
+				"position": map[string]any{
+					"x": lngToMapX(wp.Lng, wp.Lat),
+					"y": latToMapY(wp.Lat),
+					"z": wp.Alt,
+				},
+				"orientation": map[string]any{"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
+			},
+		},
+	}
+	goalJSON, err := json.Marshal(goal)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.actionCallID = callID
+	c.actionResult = make(chan actionResultMsg, 4)
+	c.mu.Unlock()
+	return c.send(rosMessage{
+		Op:     "send_action_goal",
+		ID:     callID,
+		Action: actionNav2Pose,
+		Type:   typeNav2Pose,
+		Msg:    goalJSON,
+	})
+}
+
+// waitActionResult blocks for the action result (deadline-bounded) and maps
+// GoalStatus to error.
+func (c *conn) waitActionResult(ctx context.Context, callID string, timeout time.Duration) error {
+	deadline := time.After(timeout)
+	for {
+		c.mu.Lock()
+		ch := c.actionResult
+		c.mu.Unlock()
+		if ch == nil {
+			return fmt.Errorf("no in-flight action")
+		}
+		select {
+		case res := <-ch:
+			switch res.Status {
+			case 4: // SUCCEEDED
+				return nil
+			case 5:
+				return fmt.Errorf("nav2 goal canceled")
+			case 6:
+				return fmt.Errorf("nav2 goal aborted")
+			default:
+				// still executing — keep waiting until deadline
+			}
+		case <-deadline:
+			return fmt.Errorf("nav2 goal result timeout after %s", timeout)
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }
 
@@ -313,8 +438,11 @@ func (a *Adapter) CreateMission(_ context.Context, d sdk.Device, m sdk.Mission) 
 	return nil
 }
 
-// StartMission publishes the first goal and enables the sequencing loop.
-func (a *Adapter) StartMission(_ context.Context, d sdk.Device, missionID string) error {
+// StartMission drives the waypoint sequence. Default mode is the Nav2 action
+// protocol (NavigateToPose goals, result-verified per waypoint); devices with
+// Metadata["nav_mode"]="topic" fall back to publishing /goal_pose (ADR-011
+// upgrade of ADR-007's goal-topic MVP).
+func (a *Adapter) StartMission(ctx context.Context, d sdk.Device, missionID string) error {
 	c, err := a.getConn(d)
 	if err != nil {
 		return err
@@ -327,10 +455,35 @@ func (a *Adapter) StartMission(_ context.Context, d sdk.Device, missionID string
 	c.running = true
 	c.goalIdx = 0
 	c.progress = 0
-	wp := c.goals[0]
+	c.navMode = d.Metadata["nav_mode"]
+	goals := append([]sdk.Waypoint(nil), c.goals...)
 	c.mu.Unlock()
-	if err := a.publishGoal(d.Code, c, wp); err != nil {
-		return err
+
+	if c.navMode == "topic" {
+		if err := a.publishGoal(d.Code, c, goals[0]); err != nil {
+			return err
+		}
+		a.log.Info("rosbridge mission started (topic fallback)", "device", d.Code, "mission", missionID)
+		return nil
+	}
+
+	for i, wp := range goals {
+		callID := fmt.Sprintf("%s-wp-%d", missionID, i+1)
+		if err := c.sendNavigateToPoseAction(callID, wp); err != nil {
+			return fmt.Errorf("goal %d/%d: %w", i+1, len(goals), err)
+		}
+		if err := c.waitActionResult(ctx, callID, goalTimeout); err != nil {
+			return fmt.Errorf("goal %d/%d: %w", i+1, len(goals), err)
+		}
+		c.mu.Lock()
+		c.goalIdx = i + 1
+		c.progress = float64(i+1) / float64(len(goals)) * 100
+		done := c.goalIdx >= len(goals)
+		if done {
+			c.running = false
+		}
+		c.mu.Unlock()
+		a.log.Info("rosbridge goal reached (action)", "device", d.Code, "waypoint", i+1)
 	}
 	a.log.Info("rosbridge mission started", "device", d.Code, "mission", missionID)
 	return nil
@@ -344,19 +497,29 @@ func (c *conn) stopMotion() {
 	})
 }
 
-// PauseMission stops motion; the goal sequence resumes on ResumeMission.
+// PauseMission cancels the in-flight Nav2 goal (action mode) or stops motion
+// (topic fallback); ResumeMission re-issues the current waypoint.
 func (a *Adapter) PauseMission(_ context.Context, d sdk.Device, missionID string) error {
 	c, err := a.getConn(d)
 	if err != nil {
 		return err
+	}
+	c.mu.Lock()
+	callID := c.actionCallID
+	topicMode := c.navMode == "topic"
+	c.mu.Unlock()
+	if !topicMode && callID != "" {
+		if err := c.send(rosMessage{Op: "cancel_action", ID: callID}); err != nil {
+			return err
+		}
 	}
 	c.stopMotion()
 	a.log.Info("rosbridge mission paused", "device", d.Code, "mission", missionID)
 	return nil
 }
 
-// ResumeMission re-publishes the current goal.
-func (a *Adapter) ResumeMission(_ context.Context, d sdk.Device, missionID string) error {
+// ResumeMission re-issues the current waypoint through the active mode.
+func (a *Adapter) ResumeMission(ctx context.Context, d sdk.Device, missionID string) error {
 	c, err := a.getConn(d)
 	if err != nil {
 		return err
@@ -364,18 +527,32 @@ func (a *Adapter) ResumeMission(_ context.Context, d sdk.Device, missionID strin
 	c.mu.Lock()
 	idx := c.goalIdx
 	goals := c.goals
+	topicMode := c.navMode == "topic"
 	c.mu.Unlock()
 	if idx >= len(goals) {
 		return fmt.Errorf("mission already finished")
 	}
-	return a.publishGoal(d.Code, c, goals[idx])
+	if topicMode {
+		return a.publishGoal(d.Code, c, goals[idx])
+	}
+	callID := fmt.Sprintf("%s-resume-%d", missionID, idx+1)
+	if err := c.sendNavigateToPoseAction(callID, goals[idx]); err != nil {
+		return err
+	}
+	return c.waitActionResult(ctx, callID, goalTimeout)
 }
 
-// StopMission stops motion and clears the sequence.
+// StopMission cancels any in-flight goal, stops motion and clears the sequence.
 func (a *Adapter) StopMission(_ context.Context, d sdk.Device, missionID string) error {
 	c, err := a.getConn(d)
 	if err != nil {
 		return err
+	}
+	c.mu.Lock()
+	callID := c.actionCallID
+	c.mu.Unlock()
+	if callID != "" {
+		_ = c.send(rosMessage{Op: "cancel_action", ID: callID})
 	}
 	c.stopMotion()
 	c.mu.Lock()

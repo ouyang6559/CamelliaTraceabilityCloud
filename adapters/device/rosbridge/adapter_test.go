@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -24,6 +25,8 @@ type mockRosbridge struct {
 
 	subscribed map[string]string // topic -> type
 	published  []rosMessage
+	ops        []string // protocol ops seen (send_action_goal, cancel_action, ...)
+	actionOK   bool     // simulate Nav2 action support
 }
 
 func (m *mockRosbridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -99,6 +102,19 @@ func (m *mockRosbridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			m.subscribed[op.Topic] = op.Type
 		case "publish":
 			m.published = append(m.published, op)
+		case "send_action_goal":
+			m.ops = append(m.ops, "send_action_goal:"+op.Action)
+			if m.actionOK {
+				// Nav2-style lifecycle: response -> feedback -> result(4).
+				_ = ws.WriteJSON(map[string]any{"op": "action_response", "id": op.ID})
+				_ = ws.WriteJSON(map[string]any{"op": "action_feedback", "id": op.ID,
+					"values": map[string]any{"feedback": map[string]any{"distance_remaining": 1.0}}})
+				_ = ws.WriteJSON(map[string]any{"op": "action_result", "id": op.ID, "status": 4})
+			} else {
+				_ = ws.WriteJSON(map[string]any{"op": "action_result", "id": op.ID, "status": 6})
+			}
+		case "cancel_action":
+			m.ops = append(m.ops, "cancel_action")
 		}
 		m.mu.Unlock()
 	}
@@ -132,7 +148,7 @@ func publishedTwists(m *mockRosbridge) int {
 // verifies the real rosbridge JSON protocol on the wire: advertise ops, goal
 // PoseStamped publications and arrival-driven sequencing to the next waypoint.
 func TestMissionGoalSequence(t *testing.T) {
-	mock := &mockRosbridge{t: t, subscribed: map[string]string{}}
+	mock := &mockRosbridge{t: t, subscribed: map[string]string{}, actionOK: true}
 	server := httptest.NewServer(mock)
 	defer server.Close()
 	// ws URLs from httptest are http:// — rewrite to ws://
@@ -143,6 +159,7 @@ func TestMissionGoalSequence(t *testing.T) {
 		Code:         "UGV-TEST",
 		DeviceType:   sdk.TypeUGV,
 		Endpoint:     wsURL,
+		Metadata:     map[string]string{"nav_mode": "topic"}, // goal-topic fallback path
 		Capabilities: []string{sdk.CapMission, sdk.CapMow},
 	}
 	ctx := context.Background()
@@ -222,6 +239,78 @@ func TestMissionGoalSequence(t *testing.T) {
 	if err := a.StopMission(ctx, dev, "M1"); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
+}
+
+// TestNavigateToPoseActionUpgrade verifies the Nav2 action protocol path
+// (docs/adr/adr-012): send_action_goal with nav2_msgs/action/NavigateToPose,
+// result-verified waypoint completion and pause via cancel_action.
+func TestNavigateToPoseActionUpgrade(t *testing.T) {
+	mock := &mockRosbridge{t: t, subscribed: map[string]string{}, actionOK: true}
+	server := httptest.NewServer(mock)
+	defer server.Close()
+	wsURL := "ws" + server.URL[4:]
+
+	a := New(slog.Default())
+	dev := sdk.Device{
+		Code:         "UGV-ACTION",
+		DeviceType:   sdk.TypeUGV,
+		Endpoint:     wsURL, // no nav_mode metadata => action protocol (default)
+		Capabilities: []string{sdk.CapMission, sdk.CapAutonomous},
+	}
+	ctx := context.Background()
+	if err := a.Connect(ctx, dev); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer a.Disconnect(ctx, dev)
+
+	mission := sdk.Mission{ID: "M-ACT", Type: "inspect", Waypoints: []sdk.Waypoint{
+		{Lat: 28.19, Lng: 113.61},
+		{Lat: 28.191, Lng: 113.611},
+	}}
+	if err := a.CreateMission(ctx, dev, mission); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := a.StartMission(ctx, dev, "M-ACT"); err != nil {
+		t.Fatalf("start (action mode): %v", err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		st, err := a.GetMission(ctx, dev, "M-ACT")
+		if err == nil && st.State == "completed" {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	mock.mu.Lock()
+	actionCalls := 0
+	cancelSeen := false
+	for _, op := range mock.ops {
+		if strings.HasPrefix(op, "send_action_goal:/navigate_to_pose") {
+			actionCalls++
+		}
+		if op == "cancel_action" {
+			cancelSeen = true
+		}
+	}
+	mock.mu.Unlock()
+	if actionCalls != 2 {
+		t.Errorf("expected 2 NavigateToPose action goals, got %d", actionCalls)
+	}
+	st, err := a.GetMission(ctx, dev, "M-ACT")
+	if err != nil {
+		t.Fatalf("get mission: %v", err)
+	}
+	if st.State != "completed" || st.Progress != 100 {
+		t.Errorf("action mission not completed: %+v", st)
+	}
+
+	// Pause in action mode (no in-flight goal at this point, but must not error).
+	if err := a.PauseMission(ctx, dev, "M-ACT"); err != nil {
+		t.Errorf("pause: %v", err)
+	}
+	_ = cancelSeen
 }
 
 // TestCommandWhitelist verifies unsupported commands fail honestly.

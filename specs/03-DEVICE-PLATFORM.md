@@ -26,7 +26,8 @@ UAV                   UAV/UGV  Robot
 > 已注册适配器（docs/adr/adr-007）：
 > - `generic-mqtt`（P0 参考实现）
 > - `mavlink`（P0，TASK-030 ✅：任务上传协议/解锁/任务启动/暂停恢复/RTL，mock 载具回环测试）
-> - `rosbridge`（P0 ROS 2，TASK-031 ✅：/goal_pose 序列 + /odom 到点推进 + /cmd_vel 停车）
+> - `rosbridge`（P0 ROS 2，TASK-031 ✅：**Nav2 action 协议**（send_action_goal/
+>   action_result 逐航点校验）+ /goal_pose 话题回退（nav_mode="topic"）+ /cmd_vel 停车）
 > - DJI 上云API（TASK-032）与 XAG（TASK-033）待官方凭证/授权（不得伪造），目录占位。
 
 建议接口：
