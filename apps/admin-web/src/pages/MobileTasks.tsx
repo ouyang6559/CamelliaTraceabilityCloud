@@ -7,6 +7,7 @@ import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiError, listPage, postJSON } from '../api/client'
+import { offlineEnqueue, offlineLen } from '../api/offline'
 
 interface TaskRow {
   id: string
@@ -34,6 +35,12 @@ export default function MobileTasks() {
   const [gps, setGps] = useState<{ lat: number; lng: number; accuracy?: number } | null>(null)
   const [gpsBusy, setGpsBusy] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [queueLen, setQueueLen] = useState(0)
+
+  function refreshQueueLen() {
+    void offlineLen().then(setQueueLen)
+  }
+  useEffect(() => { refreshQueueLen() }, [])
 
   const today = useQuery({
     queryKey: ['mobile-today'],
@@ -56,7 +63,13 @@ export default function MobileTasks() {
     }
   }, [])
 
-  function captureGPS() {
+  function isOfflineError(err: unknown): boolean {
+  if (!navigator.onLine) return true
+  const msg = err instanceof Error ? err.message : String(err)
+  return msg.includes('Network Error') || msg.includes('timeout') || msg.includes('ERR_INTERNET')
+}
+
+function captureGPS() {
     if (!('geolocation' in navigator)) {
       message.error(t('mobile.gpsUnsupported'))
       return
@@ -79,18 +92,31 @@ export default function MobileTasks() {
   async function complete() {
     if (!completing) return
     setSubmitting(true)
+    const body: Record<string, unknown> = { note: note || '' }
+    if (gps) {
+      body.latitude = gps.lat
+      body.longitude = gps.lng
+    }
     try {
-      const body: Record<string, unknown> = { note: note || '' }
-      if (gps) {
-        body.latitude = gps.lat
-        body.longitude = gps.lng
-      }
       await postJSON(`/agricultural-tasks/${completing.id}/complete`, body)
       message.success(t('mobile.completed'))
       setCompleting(null)
       setNote('')
       void qc.invalidateQueries({ queryKey: ['mobile-today'] })
     } catch (err) {
+      // Offline capture (specs/11.4): queue for auto-flush on connectivity regain.
+      if (isOfflineError(err)) {
+        await offlineEnqueue({
+          kind: 'task-complete',
+          endpoint: `/api/v1/agricultural-tasks/${completing.id}/complete`,
+          body,
+        })
+        message.warning(`${t('mobile.queued')} (${t('mobile.queuedHint')})`)
+        setCompleting(null)
+        setNote('')
+        refreshQueueLen()
+        return
+      }
       message.error(apiError(err))
     } finally {
       setSubmitting(false)
@@ -106,8 +132,8 @@ export default function MobileTasks() {
     }
   }
 
-  const openTasks = (today.data?.items ?? []).filter((t) => t.status !== 'completed' && t.status !== 'cancelled')
-  const doneTasks = (today.data?.items ?? []).filter((t) => t.status === 'completed')
+  const openTasks = (today.data?.items ?? []).filter((t: TaskRow) => t.status !== 'completed' && t.status !== 'cancelled')
+  const doneTasks = (today.data?.items ?? []).filter((t: TaskRow) => t.status === 'completed')
 
   return (
     <div style={{ padding: 12, maxWidth: 640, margin: '0 auto' }}>
@@ -115,7 +141,10 @@ export default function MobileTasks() {
         <Typography.Title level={4} style={{ margin: 0 }}>
           <CarryOutOutlined /> {t('mobile.title')}
         </Typography.Title>
-        <Typography.Text type="secondary">{dayjs().format('YYYY-MM-DD dddd')}</Typography.Text>
+        <Space>
+          {queueLen > 0 && <Tag color="orange">{t('mobile.pendingOffline')}: {queueLen}</Tag>}
+          <Typography.Text type="secondary">{dayjs().format('YYYY-MM-DD dddd')}</Typography.Text>
+        </Space>
       </Space>
 
       <Card size="small" style={{ marginBottom: 12 }}>
@@ -135,7 +164,7 @@ export default function MobileTasks() {
       <List
         dataSource={openTasks}
         locale={{ emptyText: <Empty description={t('mobile.allDone')} /> }}
-        renderItem={(task) => (
+        renderItem={(task: TaskRow) => (
           <List.Item
             style={{ padding: '12px 4px' }}
             actions={[
@@ -173,7 +202,7 @@ export default function MobileTasks() {
           <List
             size="small"
             dataSource={doneTasks}
-            renderItem={(task) => (
+            renderItem={(task: TaskRow) => (
               <List.Item>
                 <List.Item.Meta
                   title={<span>✅ {task.title}</span>}

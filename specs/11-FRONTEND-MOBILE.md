@@ -97,7 +97,8 @@ MapLibre GL JS
 > 今日任务列表（开始/完成）、GPS 采集（浏览器 geolocation，附带完成记录 →
 > TraceEvent）；响应式窄屏优化。扫码（一物一码查询）复用 trace-web；
 > 病虫害上报页 `/mobile/report`（相机拍照 + GPS + 字典）已落地；
-> PWA 离线采集队列（IndexedDB）为后续项。
+> **PWA 离线采集闭环已落地**（sw.js app shell 缓存 + IndexedDB 队列 + online
+> 自动重放，specs/11.4 Offline Capture -> Sync Queue -> Server）。
 
 ## 4. 离线
 

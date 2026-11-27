@@ -39,3 +39,12 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     </ConfigProvider>
   </React.StrictMode>,
 )
+
+// PWA (specs/11.4): service worker registers in production builds only, and
+// the offline capture queue auto-flushes on connectivity regain.
+const isProd = (import.meta as unknown as { env?: { PROD?: boolean } }).env?.PROD === true
+if (isProd && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => undefined)
+  })
+}

@@ -249,6 +249,9 @@ const resources = {
         takePhoto: '拍照 / 选择照片',
         photos: '张照片',
         notePh: '补充说明（可选）',
+        queued: '已离线保存',
+        queuedHint: '恢复网络后自动提交',
+        pendingOffline: '离线待同步',
       },
       rs: {
         jobsTab: '处理任务',
@@ -530,6 +533,9 @@ const resources = {
         takePhoto: 'Take / pick photo',
         photos: 'photos',
         notePh: 'Notes (optional)',
+        queued: 'Saved offline',
+        queuedHint: 'auto-submits when back online',
+        pendingOffline: 'Pending offline',
       },
       rs: {
         jobsTab: 'Processing Jobs',
