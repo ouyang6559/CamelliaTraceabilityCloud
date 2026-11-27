@@ -309,11 +309,12 @@ func (api *API) importItem(w http.ResponseWriter, r *http.Request) {
 	}
 	collection := chi.URLParam(r, "collection")
 	var req struct {
-		FileID    string  `json:"file_id"`
-		Title     string  `json:"title"`
-		Lat       float64 `json:"lat"`
-		Lng       float64 `json:"lng"`
-		MissionID string  `json:"mission_id"`
+		FileID    string    `json:"file_id"`
+		Title     string    `json:"title"`
+		Lat       float64   `json:"lat"`
+		Lng       float64   `json:"lng"`
+		BBox      []float64 `json:"bbox"` // [minLng, minLat, maxLng, maxLat] -> Polygon footprint
+		MissionID string    `json:"mission_id"`
 	}
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		httpx.Respond(w, r, nil, err)
@@ -351,7 +352,16 @@ func (api *API) importItem(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 	}
-	if req.Lat != 0 || req.Lng != 0 {
+	switch {
+	case len(req.BBox) == 4:
+		// Polygon footprint from bbox (MapLibre overlay / STAC standard shape).
+		minLng, minLat, maxLng, maxLat := req.BBox[0], req.BBox[1], req.BBox[2], req.BBox[3]
+		item["geometry"] = map[string]any{
+			"type":        "Polygon",
+			"coordinates": [][][]float64{{{minLng, minLat}, {maxLng, minLat}, {maxLng, maxLat}, {minLng, maxLat}, {minLng, minLat}}},
+		}
+		item["properties"].(map[string]any)["bbox"] = req.BBox
+	case req.Lat != 0 || req.Lng != 0:
 		item["geometry"] = map[string]any{
 			"type":        "Point",
 			"coordinates": []float64{req.Lng, req.Lat},

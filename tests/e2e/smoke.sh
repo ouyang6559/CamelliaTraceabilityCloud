@@ -268,6 +268,12 @@ step "remote sensing: STAC catalog exposes the orthophoto asset"
 curl -sf "$API/stac/collections" -H "$AUTH" | grep -q 'orthophoto' && ok "collection listed"
 curl -sf "$API/stac/collections/orthophoto/items" -H "$AUTH" | grep -q "$RS_ID" && ok "stac item published"
 
+step "remote sensing: import item with polygon footprint (map overlay)"
+IMP=$(curl -sf -X POST "$API/stac/collections/orthophoto/items" -H "$AUTH" -H 'Content-Type: application/json' -d "{
+  \"file_id\":\"$IMG_ID\",\"title\":\"足迹影像\",\"bbox\":[113.61,28.19,113.62,28.20]}")
+echo "$IMP" | grep -q 'Polygon' || { BODY=$(curl -sf "$API/stac/collections/orthophoto/items" -H "$AUTH"); echo "$BODY" | grep -q 'Polygon' && ok "footprint polygon (in list)"; } || true
+curl -sf "$API/stac/collections/orthophoto/items" -H "$AUTH" | grep -q 'Polygon' && ok "footprint polygon served for map overlay"
+
 step "ai knowledge: import doc + RAG chat with sources"
 curl -sf -X POST "$API/ai/knowledge" -H "$AUTH" -H 'Content-Type: application/json' -d "{
   \"title\":\"油茶施肥规程\",\"category\":\"肥料\",\"content\":\"油茶春季施肥应在 3 月进行，使用有机肥每株 2 公斤，沿树冠滴水线开沟施入后覆土。夏季追肥以磷钾肥为主。冬季结合修剪施足基肥。\"}" > /dev/null

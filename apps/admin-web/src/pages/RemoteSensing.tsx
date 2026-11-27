@@ -1,14 +1,25 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import {
   Button, Card, Form, Input, message, Modal, Select, Space, Table, Tabs, Tag, Upload, Typography,
 } from 'antd'
 import {
-  CloudUploadOutlined, ReloadOutlined, GlobalOutlined, FileImageOutlined,
+  CloudUploadOutlined, ReloadOutlined, GlobalOutlined, FileImageOutlined, 
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
+import maplibregl from 'maplibre-gl'
+import { cogProtocol } from '@geomatico/maplibre-cog-protocol'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import MapView from '../components/MapView'
 import { apiError, getJSON, listPage, postJSON, uploadFile } from '../api/client'
+
+let cogRegistered = false
+function ensureCogProtocol() {
+  if (!cogRegistered) {
+    maplibregl.addProtocol('cog', (params) => cogProtocol(params) as Promise<maplibregl.GetResourceResponse<ImageBitmap>>)
+    cogRegistered = true
+  }
+}
 
 const statusColor: Record<string, string> = {
   queued: 'default', running: 'orange', succeeded: 'green', failed: 'red', cancelled: 'default',
@@ -46,6 +57,53 @@ export default function RemoteSensing() {
     queryFn: () => listPage<Record<string, unknown>>(`/stac/collections/${collection}/items`),
     enabled: tab === 'stac',
   })
+
+  const mapRef = useRef<maplibregl.Map | null>(null)
+  const [overlaidItem, setOverlaidItem] = useState<string | null>(null)
+
+  // Footprint FeatureCollection from item.geometry (Polygon from bbox, Point).
+  const footprintData = useMemo(() => {
+    const rows = items.data?.items ?? []
+    const features = rows
+      .filter((r) => {
+        const item = r.item as { geometry?: unknown } | null
+        return item?.geometry != null
+      })
+      .map((r) => {
+        const item = r.item as { geometry: GeoJSON.Geometry; id?: string }
+        return { type: 'Feature' as const, id: String(r.id), geometry: item.geometry, properties: { id: String(r.id), title: (r.item as { properties?: { title?: string } })?.properties?.title ?? '' } }
+      })
+    return { type: 'FeatureCollection' as const, features }
+  }, [items.data])
+
+  function overlayAsset(row: Record<string, unknown>) {
+    const item = row.item as { assets?: Record<string, { href: string }> } | null
+    const asset = item?.assets ? Object.values(item.assets)[0] : null
+    if (!asset?.href) return
+    const map = mapRef.current
+    if (!map) return
+    ensureCogProtocol()
+    const layerId = 'cog-overlay'
+    const srcId = 'cog-src'
+    if (map.getLayer(layerId)) map.removeLayer(layerId)
+    if (map.getSource(srcId)) map.removeSource(srcId)
+    const url = new URL(asset.href, window.location.origin).toString()
+    // COG GeoTIFF renders via the cog:// protocol; plain images fall back to raster.
+    const isTiff = url.toLowerCase().includes('.tif')
+    map.addSource(srcId, isTiff
+      ? { type: 'raster', url: 'cog://' + url }
+      : { type: 'raster', tiles: [url], tileSize: 256 })
+    map.addLayer({ id: layerId, type: 'raster', source: srcId, paint: { 'raster-opacity': 0.85 } })
+    setOverlaidItem(String(row.id))
+    message.success(t('rs.overlayOn'))
+  }
+
+  function clearOverlay() {
+    const map = mapRef.current
+    if (map?.getLayer('cog-overlay')) map.removeLayer('cog-overlay')
+    if (map?.getSource('cog-src')) map.removeSource('cog-src')
+    setOverlaidItem(null)
+  }
 
   async function handleUpload(file: File) {
     try {
@@ -105,15 +163,20 @@ export default function RemoteSensing() {
       render: (v: unknown) => (v ? <span className="mono">{String(v).slice(0, 12)}…</span> : '手动导入') },
     { key: 'created_at', title: t('common.createdAt'), dataIndex: 'created_at', width: 170,
       render: (v: string) => v?.slice(0, 19).replace('T', ' ') },
-    { key: 'actions', title: t('common.actions'), width: 120,
+    { key: 'actions', title: t('common.actions'), width: 200,
       render: (_, row) => (
-        <a onClick={() => {
-          const item = row.item as { assets?: Record<string, { href: string }> } | null
-          const asset = item?.assets ? Object.values(item.assets)[0] : null
-          if (asset?.href) window.open(asset.href, '_blank')
-        }}>
-          <FileImageOutlined /> {t('rs.openAsset')}
-        </a>
+        <Space size="small">
+          <a onClick={() => {
+            const item = row.item as { assets?: Record<string, { href: string }> } | null
+            const asset = item?.assets ? Object.values(item.assets)[0] : null
+            if (asset?.href) window.open(asset.href, '_blank')
+          }}>
+            <FileImageOutlined /> {t('rs.openAsset')}
+          </a>
+          <a onClick={() => overlayAsset(row)}>
+            {t('rs.overlay')}
+          </a>
+        </Space>
       ) },
   ]
 

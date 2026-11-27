@@ -17,14 +17,24 @@ import (
 // publishing STAC items for produced assets and NATS events (specs/04.10:
 // assets expressed as Catalog/Collection/Item/Asset).
 type Worker struct {
-	pool      *pgxpool.Pool
-	processor Processor
-	pub       *events.Publisher
-	log       *slog.Logger
+	pool       *pgxpool.Pool
+	processor  Processor
+	processors map[string]Processor // optional per-type registry (gdal/nodeodm)
+	pub        *events.Publisher
+	log        *slog.Logger
 }
 
 func NewWorker(pool *pgxpool.Pool, processor Processor, pub *events.Publisher, log *slog.Logger) *Worker {
 	return &Worker{pool: pool, processor: processor, pub: pub, log: log}
+}
+
+// RegisterProcessor adds a named processor selectable per job
+// (job.processor field: mock | nodeodm | gdal).
+func (w *Worker) RegisterProcessor(name string, p Processor) {
+	if w.processors == nil {
+		w.processors = map[string]Processor{}
+	}
+	w.processors[name] = p
 }
 
 // Start launches the background processing loop until ctx is cancelled.
@@ -89,7 +99,7 @@ func (w *Worker) promoteQueued(ctx context.Context) {
 			w.fail(ctx, q.id, q.tenantID, "no processor available for %q", q.processor)
 			continue
 		}
-		extID, err := proc.Start(ctx, q.jobType, q.inputs)
+		extID, err := proc.Start(TenantContext(ctx, q.tenantID), q.jobType, q.inputs)
 		if err != nil {
 			w.fail(ctx, q.id, q.tenantID, "start failed: %v", err)
 			continue
@@ -135,7 +145,7 @@ func (w *Worker) advanceRunning(ctx context.Context) {
 			w.fail(ctx, j.id, j.tenantID, "processor %q disappeared", j.processor)
 			continue
 		}
-		state, err := proc.Poll(ctx, j.jobType, j.extTaskID, j.inputs)
+		state, err := proc.Poll(TenantContext(ctx, j.tenantID), j.jobType, j.extTaskID, j.inputs)
 		if err != nil {
 			w.fail(ctx, j.id, j.tenantID, "poll failed: %v", err)
 			continue
@@ -235,17 +245,22 @@ func (w *Worker) fail(ctx context.Context, jobID, tenantID, format string, args 
 	w.log.Warn("rs job failed", "job", jobID, "err", msg)
 }
 
-// processorFor resolves the configured processor ('mock' always; 'nodeodm' when
-// the deployment configured a NodeODM URL).
+// processorFor resolves the configured processor: per-job choice first
+// (registry), falling back to the deployment default.
 func (w *Worker) processorFor(name string) Processor {
+	if p, ok := w.processors[name]; ok {
+		return p
+	}
 	switch name {
 	case "mock":
 		return &MockProcessor{}
 	case "nodeodm":
-		if nodeodm, ok := w.processor.(Processor); ok && w.processor.Name() == "nodeodm" {
-			return nodeodm
+		if w.processor.Name() == "nodeodm" {
+			return w.processor
 		}
 		return nil
+	case "gdal":
+		return nil // gdal registers itself only when gdal_translate is present
 	default:
 		return nil
 	}
@@ -281,4 +296,18 @@ func buildStacItem(itemID, collection, jobID, processorName string, out JobOutpu
 			{"rel": "parent", "href": "/api/v1/stac/collections/" + collection},
 		},
 	}
+}
+
+// tenantKey carries the job tenant into processor sinks/fetchers (ADR-011).
+type tenantKey struct{}
+
+// TenantContext returns ctx carrying tenantID for processor file I/O.
+func TenantContext(ctx context.Context, tenantID string) context.Context {
+	return context.WithValue(ctx, tenantKey{}, tenantID)
+}
+
+// TenantFromContext extracts the job tenant set by TenantContext.
+func TenantFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(tenantKey{}).(string)
+	return v
 }

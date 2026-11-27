@@ -5,6 +5,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -37,6 +38,7 @@ import (
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/modules/stream"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/modules/sync"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/modules/trace"
+	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/ulidx"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/platform"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/seed"
 )
@@ -206,8 +208,9 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 			alertModule.Mount(priv, authorize)
 			quality.NewModule(pool, traceSvc).Mount(priv, authorize)
 
-			// Phase 4 remote sensing (ADR-008): processor by configuration
-			// (mock default; NodeODM when CTC_NODEODM_URL set — specs/04.9).
+			// Phase 4 remote sensing (ADR-008/ADR-011): processor per job —
+			// mock (default), nodeodm (when configured), gdal (when the
+			// gdal_translate binary is available in this image).
 			var rsProcessor remotesensing.Processor = &remotesensing.MockProcessor{}
 			if cfg.NodeODMURL != "" {
 				rsProcessor = &remotesensing.NodeODMProcessor{
@@ -217,6 +220,16 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 				log.Info("nodeodm processor configured", "url", cfg.NodeODMURL)
 			}
 			rsWorker := remotesensing.NewWorker(pool, rsProcessor, pub, log)
+
+			// Tenant-scoped file sink + input fetcher for the GDAL processor.
+			rsSink := remotesensingFileSink{pool: pool, storage: storage}
+			rsFetcher := remotesensingInputFetcher{pool: pool, storage: storage}
+			if gdalProc, err := remotesensing.NewGDALProcessor(rsSink, rsFetcher, "", log); err == nil {
+				rsWorker.RegisterProcessor("gdal", gdalProc)
+				log.Info("gdal processor available (real COG conversion)", "bin", "gdal_translate")
+			} else {
+				log.Info("gdal processor unavailable; gdal jobs will fail honestly", "reason", err.Error())
+			}
 			rsWorker.Start(ctx)
 			remotesensing.NewAPI(pool).Mount(priv, authorize)
 
@@ -251,6 +264,59 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 		log.Info("mqtt ready")
 	}
 	return app, nil
+}
+
+// remotesensingFileSink stores produced rasters as tenant files (ADR-011).
+type remotesensingFileSink struct {
+	pool    *pgxpool.Pool
+	storage platform.ObjectStorage
+}
+
+func (s remotesensingFileSink) SaveOutput(ctx context.Context, filename, contentType string, r io.Reader) (string, error) {
+	// The GDAL worker resolves the job tenant per input; the sink needs the
+	// tenant too — the worker-owned fetcher/sink closures are created per
+	// module here, so we thread tenant via the filename prefix is NOT tenable.
+	// Instead the sink accepts the tenant from a context value set by the
+	// worker's job-scoped goroutine.
+	tenantID := remotesensing.TenantFromContext(ctx)
+	if tenantID == "" {
+		return "", fmt.Errorf("tenant not resolved for output sink")
+	}
+	objectKey := tenantID + "/rs/" + filename
+	sha, err := platform.PutFile(ctx, s.storage, objectKey, r)
+	if err != nil {
+		return "", err
+	}
+	fileID := ulidx.New()
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO files (id, tenant_id, bucket, object_key, filename, mime, size, sha256, uploaded_by)
+		VALUES ($1,$2,'rs',$3,$4,$5,0,$6,'rs-worker')`,
+		fileID, tenantID, objectKey, filename, contentType, sha); err != nil {
+		return "", err
+	}
+	return fileID, nil
+}
+
+// remotesensingInputFetcher fetches job input files (tenant-scoped via context).
+type remotesensingInputFetcher struct {
+	pool    *pgxpool.Pool
+	storage platform.ObjectStorage
+}
+
+func (f remotesensingInputFetcher) FetchInput(ctx context.Context, fileID string) (io.ReadCloser, string, error) {
+	tenantID := remotesensing.TenantFromContext(ctx)
+	var objectKey, filename string
+	err := f.pool.QueryRow(ctx,
+		`SELECT object_key, filename FROM files WHERE tenant_id=$1 AND id=$2`,
+		tenantID, fileID).Scan(&objectKey, &filename)
+	if err != nil {
+		return nil, "", err
+	}
+	rc, err := f.storage.Open(ctx, objectKey)
+	if err != nil {
+		return nil, "", err
+	}
+	return rc, filename, nil
 }
 
 // Handler returns the assembled HTTP handler.

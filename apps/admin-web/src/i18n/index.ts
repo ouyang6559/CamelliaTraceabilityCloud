@@ -231,6 +231,9 @@ const resources = {
         jobType: '处理类型',
         submitJob: '提交任务（mock 处理器即时完成）',
         openAsset: '打开资产',
+        overlay: '地图叠加',
+        clearOverlay: '清除叠加',
+        mapHint: '底图显示 STAC 足迹；点击「地图叠加」将 GeoTIFF(COG)/影像叠加到地图。真实 COG 处理需 API 镜像安装 GDAL（gdal-bin）。',
       },
       ai: {
         chat: 'AI 对话',
@@ -481,6 +484,9 @@ const resources = {
         jobType: 'Processing type',
         submitJob: 'Submit job (mock processor completes instantly)',
         openAsset: 'Open asset',
+        overlay: 'Overlay on map',
+        clearOverlay: 'Clear overlay',
+        mapHint: 'Base map shows STAC footprints; use "Overlay on map" to layer GeoTIFF(COG)/imagery. Real COG processing requires GDAL installed in the API image (gdal-bin).',
       },
       ai: {
         chat: 'AI Chat',
