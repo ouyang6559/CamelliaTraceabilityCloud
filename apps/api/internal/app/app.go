@@ -247,6 +247,20 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 
 			aiModule := ai.NewModule(pool, cfg, log)
 			aiModule.SetWeatherProvider(weatherProvider)
+			switch cfg.AIEmbeddings {
+			case "off":
+				log.Info("ai embeddings disabled; keyword retrieval only")
+			case "openai":
+				aiModule.SetEmbedder(&ai.OpenAIEmbedder{
+					BaseURL: cfg.AIBaseURL,
+					APIKey:  cfg.AIAPIKey,
+					Model:   cfg.AIEmbeddingModel,
+				})
+				log.Info("ai embeddings", "provider", "openai-compatible", "model", cfg.AIEmbeddingModel)
+			default:
+				aiModule.SetEmbedder(&ai.MockEmbedder{})
+				log.Info("ai embeddings", "provider", "mock")
+			}
 			aiModule.Mount(priv, authorize)
 
 			filesModule.Mount(priv, authorize)

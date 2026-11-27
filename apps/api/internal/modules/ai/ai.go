@@ -43,10 +43,14 @@ type Module struct {
 	provider Provider
 	log      *slog.Logger
 	weather  WeatherProvider
+	embedder Embedder
 }
 
 // SetWeatherProvider wires the weather context source (ADR-010).
 func (m *Module) SetWeatherProvider(p WeatherProvider) { m.weather = p }
+
+// SetEmbedder wires the semantic retrieval embedder (ADR-014).
+func (m *Module) SetEmbedder(e Embedder) { m.embedder = e }
 
 func NewModule(pool *pgxpool.Pool, cfg *config.Config, log *slog.Logger) *Module {
 	var p Provider

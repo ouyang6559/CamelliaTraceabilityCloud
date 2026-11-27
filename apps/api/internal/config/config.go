@@ -61,6 +61,11 @@ type Config struct {
 	// Weather (docs/adr/adr-010): mock | openmeteo (public API, no key).
 	WeatherProvider string
 
+	// AI embeddings for semantic retrieval (docs/adr/adr-014): mock (default,
+	// deterministic offline) | openai (uses CTC_AI_BASE_URL/KEY + model) | off.
+	AIEmbeddings     string
+	AIEmbeddingModel string
+
 	LogLevel string
 }
 
@@ -98,6 +103,8 @@ func Load() *Config {
 		NodeODMURL:            getenv("CTC_NODEODM_URL", ""),
 		NodeODMToken:          getenv("CTC_NODEODM_TOKEN", ""),
 		WeatherProvider:       getenv("CTC_WEATHER_PROVIDER", "openmeteo"),
+		AIEmbeddings:          getenv("CTC_AI_EMBEDDINGS", "mock"),
+		AIEmbeddingModel:      getenv("CTC_AI_EMBEDDING_MODEL", "text-embedding-3-small"),
 		LogLevel:              getenv("CTC_LOG_LEVEL", "info"),
 	}
 	if c.JWTSecret == "" {

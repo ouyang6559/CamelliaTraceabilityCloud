@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/go-chi/chi/v5"
@@ -147,55 +148,40 @@ type KnowledgeSource struct {
 	Excerpt  string `json:"excerpt"`
 }
 
-// retrieveKnowledge scores the tenant's chunks against the query and returns
-// the top-K hits. Honest scope: keyword/shingle retrieval, capped at
-// retrieveMaxRows rows scanned.
-func (m *Module) retrieveKnowledge(ctx context.Context, tenantID, query string) ([]KnowledgeSource, error) {
-	tokens := tokenizeQuery(query)
-	if len(tokens) == 0 {
-		return nil, nil
-	}
-	rows, err := m.pool.Query(ctx, `
-		SELECT kc.id, kc.doc_id, kc.content, d.title, COALESCE(d.category,'general')
-		FROM knowledge_chunks kc
-		JOIN knowledge_docs d ON d.id = kc.doc_id AND d.tenant_id = kc.tenant_id AND d.status = 'ready'
-		WHERE kc.tenant_id = $1
-		LIMIT $2`, tenantID, retrieveMaxRows)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+// chunkHit is one candidate chunk for ranking.
+type chunkHit struct {
+	chunkID   string
+	docID     string
+	content   string
+	title     string
+	cat       string
+	keyword   int
+	embedding []float64
+	score     float64 // combined score (keyword + cosine weight), computed by rankHits
+}
 
-	type hit struct {
-		chunkID string
-		docID   string
-		content string
-		title   string
-		cat     string
-		score   int
-	}
-	var hits []hit
-	for rows.Next() {
-		var chunkID, docID, content, title, cat string
-		if err := rows.Scan(&chunkID, &docID, &content, &title, &cat); err != nil {
-			return nil, err
+// rankHits scores hits by keyword count plus semantic cosine (when embeddings
+// exist on both sides), dedups per doc keeping the best chunk, sorts desc and
+// returns the top-K. Pure function — unit-tested (ADR-014).
+func rankHits(hits []chunkHit, tokens []string, queryEmbedding []float64) []chunkHit {
+	for i := range hits {
+		kw := scoreChunk(hits[i].content, tokens)
+		hits[i].keyword = kw
+		score := float64(kw)
+		if queryEmbedding != nil && len(hits[i].embedding) > 0 {
+			// cosine ∈ [-1,1]; weight 10 makes a strong semantic match
+			// comparable to ~10 keyword hits.
+			score += 10 * cosine(queryEmbedding, hits[i].embedding)
 		}
-		if sc := scoreChunk(content, tokens); sc >= retrieveMinScore {
-			hits = append(hits, hit{chunkID, docID, content, title, cat, sc})
-		}
+		hits[i].score = score
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	// Deduplicate by doc (keep the highest-scoring chunk per doc) and rank.
-	best := map[string]hit{}
+	best := map[string]chunkHit{}
 	for _, h := range hits {
 		if cur, ok := best[h.docID]; !ok || h.score > cur.score {
 			best[h.docID] = h
 		}
 	}
-	ranked := make([]hit, 0, len(best))
+	ranked := make([]chunkHit, 0, len(best))
 	for _, h := range best {
 		ranked = append(ranked, h)
 	}
@@ -207,16 +193,70 @@ func (m *Module) retrieveKnowledge(ctx context.Context, tenantID, query string) 
 	if len(ranked) > retrieveTopK {
 		ranked = ranked[:retrieveTopK]
 	}
+	return ranked
+}
+
+// retrieveKnowledge ranks the tenant's chunks against the query: keyword
+// scoring (ADR-009) merged with semantic cosine when embeddings exist
+// (ADR-014). Capped at retrieveMaxRows rows scanned.
+func (m *Module) retrieveKnowledge(ctx context.Context, tenantID, query string) ([]KnowledgeSource, error) {
+	tokens := tokenizeQuery(query)
+	if len(tokens) == 0 {
+		return nil, nil
+	}
+
+	// Query embedding (best-effort; keyword ranking remains the fallback).
+	var queryEmbedding []float64
+	if m.embedder != nil {
+		embCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		if vecs, err := m.embedder.Embed(embCtx, []string{query}); err == nil && len(vecs) > 0 {
+			queryEmbedding = vecs[0]
+		}
+		cancel()
+	}
+
+	rows, err := m.pool.Query(ctx, `
+		SELECT kc.id, kc.doc_id, kc.content, d.title, COALESCE(d.category,'general'), kc.embedding
+		FROM knowledge_chunks kc
+		JOIN knowledge_docs d ON d.id = kc.doc_id AND d.tenant_id = kc.tenant_id AND d.status = 'ready'
+		WHERE kc.tenant_id = $1
+		LIMIT $2`, tenantID, retrieveMaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var hits []chunkHit
+	for rows.Next() {
+		var h chunkHit
+		var embedding []float64
+		if err := rows.Scan(&h.chunkID, &h.docID, &h.content, &h.title, &h.cat, &embedding); err != nil {
+			return nil, err
+		}
+		if queryEmbedding != nil || scoreChunk(h.content, tokens) >= retrieveMinScore {
+			h.embedding = embedding
+			hits = append(hits, h)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	ranked := rankHits(hits, tokens, queryEmbedding)
 
 	sources := make([]KnowledgeSource, 0, len(ranked))
 	for _, h := range ranked {
+		if h.score <= 0 {
+			continue
+		}
 		excerpt := h.content
 		rn := []rune(excerpt)
 		if len(rn) > 160 {
 			excerpt = string(rn[:160]) + "…"
 		}
 		sources = append(sources, KnowledgeSource{
-			DocID: h.docID, Title: h.title, Category: h.cat, Score: h.score, Excerpt: excerpt,
+			DocID: h.docID, Title: h.title, Category: h.cat,
+			Score: int(h.score), Excerpt: excerpt,
 		})
 	}
 	return sources, nil
