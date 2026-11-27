@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### Added — Phase 2 IoT 增强：气象接入（ADR-010）
+- `WeatherProvider` 抽象：Open-Meteo 公开接口实现（免费无密钥，specs/04.5 全指标）
+  + 确定性 mock；内存 TTL 缓存（15 分钟）
+- `GET /weather/current` / `GET /weather/forecast`：lat/lng 或 farm_id
+  （农场位置/边界质心解析 + 租户归属校验）
+- AI 对话 `use_weather` + `farm_id`：实时气象上下文注入 prompt，响应携带快照
+- 修复审计遗留：/sensors、/datastreams、/observations 补 `observation:read` 授权
+- 前端「智能农业 → 气象」页：基地选择/坐标、当前天气卡、7 日预报表 + 温度/降水图
+- 冒烟新增气象段（mock provider 断言，不依赖外网）
+
 ### Added — Phase 6 AI 深化：知识库 RAG-lite（ADR-009）
 - `knowledge_docs` + `knowledge_chunks`（租户隔离），粘贴/.txt/.md 导入，
   段落优先分块（≤400 rune 滑窗 + 40 重叠）

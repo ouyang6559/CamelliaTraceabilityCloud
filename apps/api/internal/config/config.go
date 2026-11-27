@@ -58,6 +58,9 @@ type Config struct {
 	NodeODMURL   string
 	NodeODMToken string
 
+	// Weather (docs/adr/adr-010): mock | openmeteo (public API, no key).
+	WeatherProvider string
+
 	LogLevel string
 }
 
@@ -94,6 +97,7 @@ func Load() *Config {
 		PlatformAdminPassword: getenv("CTC_PLATFORM_ADMIN_PASSWORD", "platform123"),
 		NodeODMURL:            getenv("CTC_NODEODM_URL", ""),
 		NodeODMToken:          getenv("CTC_NODEODM_TOKEN", ""),
+		WeatherProvider:       getenv("CTC_WEATHER_PROVIDER", "openmeteo"),
 		LogLevel:              getenv("CTC_LOG_LEVEL", "info"),
 	}
 	if c.JWTSecret == "" {

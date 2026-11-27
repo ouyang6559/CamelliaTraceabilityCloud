@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/config"
+	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/modules/iot"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/apierr"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/ctxid"
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/httpx"
@@ -30,12 +31,22 @@ type Provider interface {
 	Vision(ctx context.Context, imageURL string, taskType string) (output string, outputType string, confidence float64, err error)
 }
 
+// WeatherProvider is the weather context source (satisfied by the iot module
+// providers; injected at app assembly). ai imports iot — no cycle.
+type WeatherProvider interface {
+	Current(ctx context.Context, lat, lng float64) (*iot.WeatherCurrent, error)
+}
+
 // Module wires AI routes.
 type Module struct {
 	pool     *pgxpool.Pool
 	provider Provider
 	log      *slog.Logger
+	weather  WeatherProvider
 }
+
+// SetWeatherProvider wires the weather context source (ADR-010).
+func (m *Module) SetWeatherProvider(p WeatherProvider) { m.weather = p }
 
 func NewModule(pool *pgxpool.Pool, cfg *config.Config, log *slog.Logger) *Module {
 	var p Provider
@@ -70,6 +81,8 @@ type chatWrite struct {
 	ContextRef   string        `json:"context_ref"` // optional ref: plot_id / batch_id / device_id
 	ContextType  string        `json:"context_type"`
 	UseKnowledge bool          `json:"use_knowledge"` // RAG-lite: retrieve tenant knowledge base (ADR-009)
+	UseWeather   bool          `json:"use_weather"`   // real-time weather context for a farm (ADR-010)
+	FarmID       string        `json:"farm_id"`       // farm whose location feeds the weather context
 }
 type chatMessage struct {
 	Role    string `json:"role"`
@@ -103,6 +116,30 @@ func (m *Module) chat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Real-time weather context (ADR-010): resolve the farm location (tenant-
+	// checked) and inject a compact nowcast block + surface the snapshot.
+	var weatherSnapshot *iot.WeatherCurrent
+	if req.UseWeather && req.FarmID != "" {
+		var n int
+		if err := m.pool.QueryRow(r.Context(),
+			`SELECT count(*) FROM farms WHERE tenant_id=$1 AND id=$2`,
+			id.TenantID, req.FarmID).Scan(&n); err != nil || n == 0 {
+			httpx.Respond(w, r, nil, apierr.Invalid("farm does not exist in your tenant"))
+			return
+		}
+		var lat, lng float64
+		if err := m.pool.QueryRow(r.Context(), `
+			SELECT COALESCE(ST_Y(location), ST_Y(ST_Centroid(boundary)), 0),
+			       COALESCE(ST_X(location), ST_X(ST_Centroid(boundary)), 0)
+			FROM farms WHERE tenant_id=$1 AND id=$2`, id.TenantID, req.FarmID).Scan(&lat, &lng); err == nil && m.weather != nil {
+			if cur, werr := m.weather.Current(r.Context(), lat, lng); werr == nil {
+				weatherSnapshot = cur
+				prompt = fmt.Sprintf("[实时气象 / Live weather] 温度 %.1f°C，湿度 %.0f%%，降水 %.1fmm，风速 %.1fkm/h，天气%s。\n\n",
+					cur.Temperature, cur.Humidity, cur.Precipitation, cur.WindSpeed, cur.WeatherText) + prompt
+			}
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 	output, outputType, confidence, err := m.provider.Chat(ctx, prompt, map[string]any{
@@ -122,6 +159,15 @@ func (m *Module) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(sources) > 0 {
 		resp["sources"] = sources
+	}
+	if weatherSnapshot != nil {
+		resp["weather"] = map[string]any{
+			"temperature":   weatherSnapshot.Temperature,
+			"humidity":      weatherSnapshot.Humidity,
+			"precipitation": weatherSnapshot.Precipitation,
+			"wind_speed":    weatherSnapshot.WindSpeed,
+			"weather_text":  weatherSnapshot.WeatherText,
+		}
 	}
 	httpx.Respond(w, r, resp, nil)
 }

@@ -109,6 +109,18 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 	alertModule := alert.NewModule(pool, pub, log)
 	devModule.SetAlertEvaluator(alertModule.EvaluateTelemetry)
 
+	// Weather provider (docs/adr/adr-010): openmeteo (public API) or mock,
+	// wrapped with an in-memory TTL cache.
+	var weatherProvider iot.WeatherProvider
+	switch cfg.WeatherProvider {
+	case "mock":
+		weatherProvider = &iot.MockProvider{}
+	default:
+		weatherProvider = &iot.OpenMeteoProvider{}
+	}
+	weatherProvider = iot.NewCachedProvider(weatherProvider, 15*time.Minute)
+	log.Info("weather provider", "provider", weatherProvider.Name())
+
 	// DeviceAdapter registry (specs/20, ADR-007): adapters registered by
 	// adapter_type. MAVLink targets ArduPilot/PX4 vehicles (Endpoint =
 	// udp:ip:port in device metadata); rosbridge targets ROS 2 robots
@@ -187,7 +199,9 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 			devModule.Mount(priv, auth, authorize)
 			missionModule.Mount(priv, authorize)
 			missionModule.MountDeviceGateway(api) // device-token authenticated
-			iot.NewModule(pool).Mount(priv)
+			iotModule := iot.NewModule(pool)
+			iotModule.SetWeatherProvider(weatherProvider)
+			iotModule.Mount(priv, authorize)
 
 			alertModule.Mount(priv, authorize)
 			quality.NewModule(pool, traceSvc).Mount(priv, authorize)
@@ -213,7 +227,9 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 			syncModule.Mount(priv, authorize)
 			app.syncModule = syncModule
 
-			ai.NewModule(pool, cfg, log).Mount(priv, authorize)
+			aiModule := ai.NewModule(pool, cfg, log)
+			aiModule.SetWeatherProvider(weatherProvider)
+			aiModule.Mount(priv, authorize)
 
 			filesModule.Mount(priv, authorize)
 

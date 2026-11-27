@@ -9,12 +9,18 @@ import { useTranslation } from 'react-i18next'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, apiError, listPage, postJSON } from '../api/client'
 
+interface WeatherSource {
+  temperature: number
+  weather_text: string
+}
+
 interface ChatEntry {
   role: 'user' | 'ai'
   content: string
   type?: string
   confidence?: number
   sources?: { doc_id: string; title: string; category: string; score: number; excerpt: string }[]
+  weather?: WeatherSource
 }
 
 /** AI 农业助手：知识库 RAG-lite（ADR-009）+ 对话输出标注为 AI 生成建议（specs/07.8）。 */
@@ -25,8 +31,15 @@ export default function AiAssistant() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [useKnowledge, setUseKnowledge] = useState(true)
+  const [useWeather, setUseWeather] = useState(false)
+  const [weatherFarmId, setWeatherFarmId] = useState<string | undefined>()
   const [kbModalOpen, setKbModalOpen] = useState(false)
   const [kbForm] = Form.useForm()
+
+  const farms = useQuery({
+    queryKey: ['ai-farms'],
+    queryFn: () => listPage<Record<string, unknown>>('/farms', { page: 1, page_size: 50 }),
+  })
 
   const jobs = useQuery({
     queryKey: ['ai-jobs'],
@@ -49,13 +62,17 @@ export default function AiAssistant() {
       const res = await postJSON<{
         output: string; output_type: string; confidence: number
         sources?: ChatEntry['sources']
+        weather?: WeatherSource
       }>('/ai/chat', {
         messages: [{ role: 'user', content: text }],
         use_knowledge: useKnowledge,
+        use_weather: useWeather && !!weatherFarmId,
+        farm_id: useWeather ? weatherFarmId : '',
       })
       setMessages((m) => [...m, {
         role: 'ai', content: res.output,
-        type: res.output_type, confidence: res.confidence, sources: res.sources,
+        type: res.output_type, confidence: res.confidence,
+        sources: res.sources, weather: res.weather,
       }])
       void qc.invalidateQueries({ queryKey: ['ai-jobs'] })
     } catch (err) {
@@ -152,15 +169,33 @@ export default function AiAssistant() {
                               ))}
                             </div>
                           )}
+                          {m.weather && (
+                            <div style={{ marginTop: 6, fontSize: 12, color: '#666' }}>
+                              {t('ai.weatherContext')}: {m.weather.weather_text} {m.weather.temperature}°C
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))}
                   </div>
-                  <div style={{ marginTop: 8 }}>
+                  <Space wrap style={{ marginTop: 8 }}>
                     <Checkbox checked={useKnowledge} onChange={(e) => setUseKnowledge(e.target.checked)}>
                       {t('ai.useKnowledge')}
                     </Checkbox>
-                  </div>
+                    <Checkbox checked={useWeather} onChange={(e) => setUseWeather(e.target.checked)}>
+                      {t('ai.useWeather')}
+                    </Checkbox>
+                    {useWeather && (
+                      <Select
+                        showSearch optionFilterProp="label"
+                        style={{ width: 200 }}
+                        placeholder={t('weather.byFarm')}
+                        value={weatherFarmId}
+                        onChange={setWeatherFarmId}
+                        options={(farms.data?.items ?? []).map((f) => ({ value: String(f.id), label: String(f.name) }))}
+                      />
+                    )}
+                  </Space>
                   <Space.Compact style={{ width: '100%', marginTop: 8 }}>
                     <Input
                       placeholder={t('ai.placeholder')}

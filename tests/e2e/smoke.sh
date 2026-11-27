@@ -276,4 +276,11 @@ RAG=$(curl -sf -X POST "$API/ai/chat" -H "$AUTH" -H 'Content-Type: application/j
 echo "$RAG" | grep -q '油茶施肥规程' && ok "RAG answer cites knowledge source"
 curl -sf "$API/ai/knowledge" -H "$AUTH" | grep -q '油茶施肥规程' && ok "knowledge doc listed"
 
+step "weather: current + forecast via provider (mock-tolerant)"
+WX=$(curl -sf "$API/weather/current?lat=28.1925&lng=113.6285" -H "$AUTH")
+echo "$WX" | grep -q '"temperature"' && ok "current weather served"
+curl -sf "$API/weather/forecast?lat=28.1925&lng=113.6285&days=7" -H "$AUTH" | grep -q '"days"' && ok "forecast served"
+FARM_ID=$(curl -sf "$API/farms?page=1&page_size=1" -H "$AUTH" | jqget "['items'][0]['id']")
+curl -sf "$API/weather/current?farm_id=$FARM_ID" -H "$AUTH" | grep -q '"location"' && ok "farm-resolved weather"
+
 printf '\n\033[32m===== SMOKE RESULT: %d steps passed =====\033[0m\n' "$PASS"

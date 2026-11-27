@@ -3,6 +3,7 @@
 package iot
 
 import (
+	"context"
 	"net/http"
 
 	"strconv"
@@ -16,27 +17,137 @@ import (
 	"github.com/ouyang6559/CamelliaTraceabilityCloud/apps/api/internal/pkg/httpx"
 )
 
-// Module exposes read-oriented IoT endpoints (writes happen via telemetry ingest).
+// Module exposes read-oriented IoT endpoints (writes happen via telemetry ingest)
+// and the weather integration (specs/04.5, docs/adr/adr-010).
 type Module struct {
-	pool *pgxpool.Pool
+	pool    *pgxpool.Pool
+	weather WeatherProvider
 }
 
 func NewModule(pool *pgxpool.Pool) *Module { return &Module{pool: pool} }
 
-// Mount registers /sensors, /datastreams, /observations.
-func (m *Module) Mount(r chi.Router) {
+// SetWeatherProvider wires the weather provider (app assembly; required for /weather).
+func (m *Module) SetWeatherProvider(p WeatherProvider) { m.weather = p }
+
+// Mount registers /sensors, /datastreams, /observations and /weather.
+// authorize wraps permission middleware — the audit (ADR-006) flagged that
+// these read endpoints previously lacked per-route authorization.
+func (m *Module) Mount(r chi.Router, authorize func(resource, action string) func(http.Handler) http.Handler) {
+	read := authorize("observation", "read")
 	r.Route("/sensors", func(rr chi.Router) {
+		rr.Use(read)
 		rr.Get("/", m.listSensors)
 		rr.Get("/{id}", m.getSensor)
 	})
 	r.Route("/datastreams", func(rr chi.Router) {
+		rr.Use(read)
 		rr.Get("/", m.listDatastreams)
 		rr.Get("/{id}", m.getDatastream)
 		rr.Get("/{id}/observations", m.observationsForStream)
 	})
 	r.Route("/observations", func(rr chi.Router) {
+		rr.Use(read)
 		rr.Get("/", m.listObservations)
 	})
+	r.Route("/weather", func(rr chi.Router) {
+		rr.Use(read)
+		rr.Get("/current", m.weatherCurrent)
+		rr.Get("/forecast", m.weatherForecast)
+	})
+}
+
+// resolveFarmLocation returns the farm's point location (or boundary centroid)
+// in WGS84, validating tenant ownership (ADR-006).
+func (m *Module) resolveFarmLocation(ctx context.Context, pool *pgxpool.Pool, tenantID, farmID string) (lat, lng float64, err error) {
+	err = pool.QueryRow(ctx, `
+		SELECT COALESCE(ST_Y(location), ST_Y(ST_Centroid(boundary)), 0),
+		       COALESCE(ST_X(location), ST_X(ST_Centroid(boundary)), 0)
+		FROM farms WHERE tenant_id=$1 AND id=$2`, tenantID, farmID).Scan(&lat, &lng)
+	return
+}
+
+func (m *Module) weatherCurrent(w http.ResponseWriter, r *http.Request) {
+	if err := m.weatherRespond(w, r, "current"); err != nil {
+		httpx.Respond(w, r, nil, err)
+	}
+}
+
+func (m *Module) weatherForecast(w http.ResponseWriter, r *http.Request) {
+	if err := m.weatherRespond(w, r, "forecast"); err != nil {
+		httpx.Respond(w, r, nil, err)
+	}
+}
+
+// weatherRespond resolves the location (query lat/lng or farm_id) and serves
+// current/forecast through the configured provider.
+func (m *Module) weatherRespond(w http.ResponseWriter, r *http.Request, kind string) error {
+	id, err := ctxid.Must(r.Context())
+	if err != nil {
+		return err
+	}
+	if m.weather == nil {
+		return apierr.Unavailable("weather provider not configured")
+	}
+	q := r.URL.Query()
+	var lat, lng float64
+	if v := q.Get("lat"); v != "" {
+		lat, err = strconv.ParseFloat(v, 64)
+		if err != nil {
+			return apierr.Invalid("invalid lat")
+		}
+	}
+	if v := q.Get("lng"); v != "" {
+		lng, err = strconv.ParseFloat(v, 64)
+		if err != nil {
+			return apierr.Invalid("invalid lng")
+		}
+	}
+	if q.Get("farm_id") != "" {
+		if err := tenantRefCheck(r, m.pool, id.TenantID, "farm", q.Get("farm_id")); err != nil {
+			return err
+		}
+		lat, lng, err = m.resolveFarmLocation(r.Context(), m.pool, id.TenantID, q.Get("farm_id"))
+		if err != nil {
+			return apierr.NotFound("farm (or farm has no location)")
+		}
+	}
+	if lat == 0 && lng == 0 {
+		return apierr.Invalid("provide lat/lng or farm_id")
+	}
+	// WGS84 sanity.
+	if lat < -90 || lat > 90 || lng < -180 || lng > 180 {
+		return apierr.Invalid("lat/lng out of range")
+	}
+
+	switch kind {
+	case "current":
+		cur, err := m.weather.Current(r.Context(), lat, lng)
+		if err != nil {
+			return apierr.Unavailable("weather fetch failed: %v", err)
+		}
+		cur.Source = m.weather.Name()
+		httpx.Respond(w, r, map[string]any{
+			"location": map[string]float64{"lat": lat, "lng": lng},
+			"current":  cur,
+		}, nil)
+	case "forecast":
+		days := 7
+		if v := q.Get("days"); v != "" {
+			if d, err := strconv.Atoi(v); err == nil && d >= 1 && d <= 16 {
+				days = d
+			}
+		}
+		f, err := m.weather.Forecast(r.Context(), lat, lng, days)
+		if err != nil {
+			return apierr.Unavailable("weather fetch failed: %v", err)
+		}
+		f.Source = m.weather.Name()
+		httpx.Respond(w, r, map[string]any{
+			"location": map[string]float64{"lat": lat, "lng": lng},
+			"forecast": f,
+		}, nil)
+	}
+	return nil
 }
 
 func (m *Module) listSensors(w http.ResponseWriter, r *http.Request) {
@@ -247,3 +358,23 @@ func joinAnd(parts []string) string {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+// tenantRefCheck validates that a referenced object belongs to the tenant (ADR-006).
+func tenantRefCheck(r *http.Request, pool *pgxpool.Pool, tenantID, refType, refID string) error {
+	var table string
+	switch refType {
+	case "farm":
+		table = "farms"
+	default:
+		return apierr.Invalid("unknown reference type %q", refType)
+	}
+	var n int
+	if err := pool.QueryRow(r.Context(),
+		"SELECT count(*) FROM "+table+" WHERE tenant_id=$1 AND id=$2", tenantID, refID).Scan(&n); err != nil {
+		return err
+	}
+	if n == 0 {
+		return apierr.Invalid("referenced %s does not exist in your tenant", refType)
+	}
+	return nil
+}

@@ -6,7 +6,7 @@ import {
   SafetyCertificateOutlined, AppstoreOutlined, DropboxOutlined, CarOutlined,
   QrcodeOutlined, FileProtectOutlined, CloudServerOutlined, SyncOutlined,
   ExperimentOutlined, TeamOutlined, SafetyOutlined, FileSearchOutlined,
-  HomeOutlined, GlobalOutlined, LineChartOutlined, RadarChartOutlined,
+  HomeOutlined, GlobalOutlined, LineChartOutlined, RadarChartOutlined, CloudOutlined,
   UserOutlined, LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
@@ -102,6 +102,7 @@ export default function AdminLayout() {
       label: t('nav.smartAgri'),
       children: [
         { key: '/remote-sensing', icon: <GlobalOutlined />, label: t('nav.remoteSensing') },
+        { key: '/weather', icon: <CloudOutlined />, label: t('nav.weather') },
       ],
     },
     { key: '/ai', icon: <RobotOutlined />, label: t('nav.ai') },

@@ -211,6 +211,10 @@ paths:
     get: { tags: [iot], summary: Time series for a datastream, responses: { "200": { description: OK } } }
   /observations:
     get: { tags: [iot], summary: Observations (datastream/device/observed_property/from/to), responses: { "200": { description: OK } } }
+  /weather/current:
+    get: { tags: [iot], summary: "Current weather (lat/lng or farm_id; Open-Meteo or mock, TTL-cached)", responses: { "200": { description: OK } } }
+  /weather/forecast:
+    get: { tags: [iot], summary: "Multi-day forecast (days=1..16)", responses: { "200": { description: OK } } }
 
   /alerts:
     get: { tags: [alert], summary: Alerts (status/severity/device), responses: { "200": { description: OK } } }

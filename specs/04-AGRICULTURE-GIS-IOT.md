@@ -74,6 +74,10 @@ FeatureOfInterest
 - pressure
 - light
 
+> **落地状态（2026-11-28）**：气象接入已落地（docs/adr/adr-010）——`/weather`
+> API（当前 + 多日预报），Open-Meteo 公开接口实现 + mock，内存 TTL 缓存；
+> AI 对话可注入实时气象上下文（use_weather）。本地气象站设备遥测与之互补。
+
 ## 6. 土壤
 
 至少：

@@ -20,7 +20,8 @@ import AuditLogs from './pages/AuditLogs'
 import { SimpleRoutes } from './pages/SimpleRoutes'
 import PlatformTenants from './pages/PlatformTenants'
 import TenantInfo from './pages/TenantInfo'
-import RemoteSensing from './pages/RemoteSensing' 
+import RemoteSensing from './pages/RemoteSensing'
+import WeatherPage from './pages/WeatherPage' 
 
 /** Route registry: simple resources are generated inline from CrudPage. */
 export default function App() {
@@ -48,6 +49,7 @@ export default function App() {
         <Route path="/audit-logs" element={<AuditLogs />} />
         <Route path="/tenant" element={<TenantInfo />} />
         <Route path="/remote-sensing" element={<RemoteSensing />} />
+        <Route path="/weather" element={<WeatherPage />} />
         {user.platform_admin && <Route path="/platform/tenants" element={<PlatformTenants />} />}
 
         {/* Simple resources rendered by the shared CrudPage */}
